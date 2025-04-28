@@ -345,8 +345,11 @@ void IndexNode::AddChild(int index, Node *child, uint64_t version,
   if (index >= 0 && index < DMM_NODE_FANOUT) {
     children_[index] = make_tuple(version, hash, child);
     bitmap_ |= (1 << index);  // update bitmap
-  } else
-    throw runtime_error("AddChild out of range.");
+  }
+  else {
+    std::string errmsg = "AddChild out of range. Index: " + std::to_string(index);
+    throw runtime_error(errmsg);
+  }
 }
 
 Node *IndexNode::GetChild(int index) const {
@@ -1033,10 +1036,9 @@ void BasePage::UpdateDeltaItem(const DeltaPage::DeltaItem &deltaitem) {
 
 Node *BasePage::GetRoot() const { return root_; }
 
-DMMTrie::DMMTrie(uint64_t tid, LSVPS *page_store, VDLS *value_store,
+DMMTrie::DMMTrie(uint64_t tid, VDLS *value_store,
                  uint64_t current_version)
     : tid(tid),
-      page_store_(page_store),
       value_store_(value_store),
       current_version_(current_version),
       root_page_(nullptr) {
@@ -1153,15 +1155,15 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
   }
 
   // unordered_map<string, DeltaPage *> active_deltapages;
-  set<string> pids;
+  // set<string> pids;
 
-  for (const auto &it : put_cache_) {
-    for (int i = it.first.size() % 2 == 0 ? it.first.size()
-                                          : it.first.size() - 1;
-         i >= 0; i -= 2) {
-      pids.insert(it.first.substr(0, i));
-    }
-  }
+  // for (const auto &it : put_cache_) {
+  //   for (int i = it.first.size() % 2 == 0 ? it.first.size()
+  //                                         : it.first.size() - 1;
+  //        i >= 0; i -= 2) {
+  //     pids.insert(it.first.substr(0, i));
+  //   }
+  // }
 
   // get the needed active deltapages from LSVPS
   // for (string pid : pids) {
@@ -1170,7 +1172,7 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
 
   for (const auto &it : updates) {
     string pid = it.first;
-    bool if_exceed = false;
+    // bool if_exceed = false;
     // get the latest version number of a page
     uint64_t page_version = GetPageVersion({0, 0, false, pid}).first;
     PageKey pagekey = {version, 0, false, pid},
@@ -1185,7 +1187,8 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
 
     // DeltaPage *deltapage = GetDeltaPage(pid);
 
-    DeltaPage *deltapage = page_store_->GetActiveDeltaPage(pid);
+    DeltaPage* deltapage = GetDeltaPage(pid);
+      // page_store_->GetActiveDeltaPage(pid);
 
     if (2 * it.second.size() + deltapage->GetDeltaPageUpdateCount() >=
         2 * Td_) {
@@ -1219,36 +1222,36 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
         value = put_cache_[path];
         location = value_store_->WriteValue(version, path, value);
       }
-      if (if_exceed) {
-        page->UpdatePage(version, location, value, nibbles, child_hash, nullptr,
-                         pagekey);
-      } else {
+      // if (if_exceed) {
+      //   page->UpdatePage(version, location, value, nibbles, child_hash, nullptr,
+      //                    pagekey);
+      // } else {
         page->UpdatePage(version, location, value, nibbles, child_hash,
                          deltapage, pagekey);
-      }
+      // }
     }
 
-    if (if_exceed) {
-      BasePage *basepage_copy = new BasePage(*page);
-      basepage_copy->SerializeTo();
-      WritePageCache(pagekey, basepage_copy);  // store basepage in cache
+    // if (if_exceed) {
+    //   BasePage *basepage_copy = new BasePage(*page);
+    //   basepage_copy->SerializeTo();
+    //   WritePageCache(pagekey, basepage_copy);  // store basepage in cache
 
-      UpdatePageVersion(pagekey, version, version);
-      deltapage->ClearBasePageUpdateCount();
-      deltapage->SetLastPageKey(pagekey);
-    }
+    //   UpdatePageVersion(pagekey, version, version);
+    //   deltapage->ClearBasePageUpdateCount();
+    //   deltapage->SetLastPageKey(pagekey);
+    // }
     UpdatePageKey(old_pagekey, pagekey);
     // deltapage->SerializeTo();
-    page_store_->StoreActiveDeltaPage(deltapage);
+    // page_store_->StoreActiveDeltaPage(deltapage);
   }
 
-  for (const auto &it : page_cache_) {
-    page_store_->StorePage(it.second);
-#ifdef DEBUG
-    std::cout << "Commit" << version
-              << " Store Page: " << it.second->GetPageKey() << std::endl;
-#endif
-  }
+//   for (const auto &it : page_cache_) {
+//     page_store_->StorePage(it.second);
+// #ifdef DEBUG
+//     std::cout << "Commit" << version
+//               << " Store Page: " << it.second->GetPageKey() << std::endl;
+// #endif
+//   }
 
   // send the active deltapages back to LSVPS
   // for (const auto &it : active_deltapages) {
@@ -1467,6 +1470,7 @@ BasePage *DMMTrie::GetPage(
     it->second = pagekeys_.begin();  // update iterator
     return it->second->second;
   }
+  return nullptr;
   // page is not in cache, fetch it from LSVPS
   BasePage *page = page_store_->LoadPage(pagekey);
   if (!page) {  // page is not found in disk
@@ -1481,15 +1485,15 @@ BasePage *DMMTrie::GetPage(
 
 void DMMTrie::PutPage(const PageKey &pagekey,
                       BasePage *page) {        // add page to cache
-  if (lru_cache_.size() >= max_cache_size_) {  // cache is full
-    PageKey last_key = pagekeys_.back().first;
-    auto last_iter = lru_cache_.find(last_key);
-    delete last_iter->second->second;  // release memory of basepage
+  // if (lru_cache_.size() >= max_cache_size_) {  // cache is full
+  //   PageKey last_key = pagekeys_.back().first;
+  //   auto last_iter = lru_cache_.find(last_key);
+  //   delete last_iter->second->second;  // release memory of basepage
 
-    // remove the page whose pagekey is at the tail of list
-    lru_cache_.erase(last_key);
-    pagekeys_.pop_back();
-  }
+  //   // remove the page whose pagekey is at the tail of list
+  //   lru_cache_.erase(last_key);
+  //   pagekeys_.pop_back();
+  // }
   auto it = lru_cache_.find(pagekey);
   if (it != lru_cache_.end()) {
     delete it->second->second;
