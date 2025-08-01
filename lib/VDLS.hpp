@@ -5,320 +5,237 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <atomic>
+#include <deque>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <queue>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
-#include <mutex>
-#include <shared_mutex>
-#include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <chrono>
+#include <filesystem>
+#include "third_party/blockingconcurrentqueue.h"  // 包含阻塞无锁队列库
 
 using namespace std;
 
-// log stream format: fileID,offset,size\n
 class VDLS {
- public:
-  // VDLS(string file_path = "/mnt/c/Users/qyf/Desktop/LETUS_prototype/data/")
-  //     : current_fileID_(0),
-  //       current_offset_(0),
-  //       file_path_(file_path),
-  //       buffer_(""),
-  //       BufferSize(0),
-  //       buffer_fileID_(-1),
-  //       buffer_offset_(-1) {}
-
-  VDLS(string file_path = "/mnt/c/Users/qyf/Desktop/LETUS_prototype/data/", string prefix = "")
-      : current_fileID_(0),
-        current_offset_(0),
-        file_path_(file_path + "data_file_" + prefix +"_"),
-        write_map_(MAP_FAILED),
-        read_map_(MAP_FAILED),
-        read_map_fileID_(-1) {
-    OpenAndMapWriteFile();
-  }
-
-  tuple<uint64_t, uint64_t, uint64_t> WriteValue(uint64_t version,
-                                                 const string& key,
-    const string& value) {
-      string record = to_string(version) + "," + key + "," + value + "\n";
-      size_t record_size = record.size();
-      
-      // 检查是否需要创建新文件
-      if (current_offset_ + record_size > MaxFileSize) {
-      // std::unique_lock<std::shared_mutex> lock(mutex_);
-    // 同步更改到磁盘
-    if (msync(write_map_, MaxFileSize, MS_SYNC) == -1) {
-      throw runtime_error("Failed to sync changes to disk");
-    }
-      // 解除旧的映射
-      if (write_map_ != MAP_FAILED) {
-        munmap(write_map_, MaxFileSize);
-      }
-
-      // 创建新文件 ID 和重置偏移量
-      current_fileID_++;
-      current_offset_ = 0;
-
-      // 重新打开和映射新文件
-      OpenAndMapWriteFile();
-      }
-      // std::shared_lock<std::shared_mutex> lock(mutex_);
-
-    // uint64_t current_offset = current_offset_.fetch_add(record_size);
-    uint64_t current_offset = current_offset_;
-
-    // 写入新记录到写映射区域
-    memcpy(static_cast<char*>(write_map_) + current_offset, record.c_str(),
-      record_size);
-
-    current_offset_ += record_size;
-
-    // 同步更改到磁盘
-    // if (msync(write_map_, MaxFileSize, MS_SYNC) == -1) {
-    //   throw runtime_error("Failed to sync changes to disk");
-    // }
-
-    // current_offset_ += record_size;
-
-    return make_tuple(current_fileID_, current_offset,
-                      record_size);
-  }
-
-  tuple<uint64_t, uint64_t, uint64_t> WriteValueV1(
-      uint64_t version, const string& key,
-      const string& value) {  // append a new record to the log stream
-    string version_str = to_string(version);
-    size_t record_size = version_str.size() + key.size() + value.size() + 3;
-    if (current_offset_ + record_size > MaxFileSize) {
-      current_fileID_++;
-      current_offset_ = 0;
+public:
+    VDLS(string file_path = "/mnt/c/Users/qyf/Desktop/LETUS_prototype/data/", string prefix = "")
+        : file_path_(file_path + "data_file_" + prefix + "_"),
+          write_map_(MAP_FAILED),
+          read_map_(MAP_FAILED),
+          read_map_fileID_(-1),
+          stop_flag_(false) {
+        current_fileID_.store(0);
+        current_offset_.store(0);
+        OpenAndMapWriteFile();
+        write_thread_ = thread(&VDLS::WriteThreadValue, this);
     }
 
-    ofstream file(
-        file_path_ + "data_file_" + to_string(current_fileID_) + ".dat",
-        ios::app);  // create or open the file for appending
-    if (!file) {
-      throw std::runtime_error("Cannot open file ");
+    ~VDLS() {
+        stop_flag_.store(true); // 设置停止标志
+        //给出退出信号
+        write_queue_.enqueue({ nullptr, -1, 0, 0 }); // 发送退出信号到写线程
+        if (write_thread_.joinable()) {
+            write_thread_.join();
+        }
+        RemainingWrite(); // 确保所有剩余的写入任务都被处理
+        if (read_map_ != MAP_FAILED) {
+            munmap(read_map_, MaxFileSize);
+        }
+    }
+    
+    tuple<int, size_t, size_t> WriteValue(uint64_t version, const string& key, const string& value) {
+        auto record_ptr = make_unique<string>(to_string(version) + "," + key + "," + value + "\n");
+        size_t record_size = record_ptr->size();
+
+        int current_fileID;
+        size_t offset;
+
+        // 原子地预留空间并处理文件切换
+        while (true) {
+            current_fileID = current_fileID_.load();
+            offset = current_offset_.load();
+
+            // 检查是否需要切换文件
+            if (offset + record_size > MaxFileSize) {
+                int new_fileID = current_fileID + 1;
+                // 尝试原子切换文件
+                if (current_fileID_.compare_exchange_strong(current_fileID, new_fileID)) {
+                    // 切换成功：重置偏移量并预留空间
+                    current_offset_.store(record_size); // 下条记录从record_size开始
+                    offset = 0; // 当前记录在新文件的0偏移
+                    current_fileID = new_fileID;
+                    break;
+                }
+                // 切换失败则重试（其他线程已切换）
+                continue;
+            }
+
+            // 尝试原子预留空间
+            if (current_offset_.compare_exchange_weak(offset, offset + record_size)) {
+                // 预留成功：使用当前文件和预留偏移
+                break;
+            }
+        }
+
+        // 入队无锁队列
+        write_queue_.enqueue({ move(record_ptr), current_fileID, offset, record_size });
+        
+        return make_tuple(current_fileID, offset, record_size);
+    }
+    
+    void WriteThreadValue() {
+        while (true) {
+            WriteTask task;
+            // 阻塞等待任务
+            write_queue_.wait_dequeue(task);
+            
+            // 检查退出信号
+            if (task.fileID == -1 || stop_flag_.load()) {
+                break;
+            }
+
+            if (task.fileID != fileID) {
+                // 切换文件
+                if (write_map_ != MAP_FAILED) {
+                    msync(write_map_, MaxFileSize, MS_SYNC);
+                    munmap(write_map_, MaxFileSize);
+                }
+                fileID = task.fileID;
+                OpenAndMapWriteFile();
+            }
+            memcpy(static_cast<char*>(write_map_) + task.offset, 
+                   task.record_ptr->c_str(), 
+                   task.size);
+        }
+    }
+    //最后清理队列中任务
+    void RemainingWrite() {
+        WriteTask task;
+        while (write_queue_.try_dequeue(task)) {
+            if (task.fileID == -1 || !task.record_ptr) continue;
+            
+            // 检查文件是否需要切换
+            if (task.fileID != fileID) {
+                if (write_map_ != MAP_FAILED) {
+                    msync(write_map_, MaxFileSize, MS_SYNC);
+                    munmap(write_map_, MaxFileSize);
+                }
+                fileID = task.fileID;
+                OpenAndMapWriteFile();
+            }
+            memcpy(static_cast<char*>(write_map_) + task.offset, 
+                   task.record_ptr->c_str(), 
+                   task.size);
+        }
+        
+        // 最后刷盘
+        if (write_map_ != MAP_FAILED) {
+            msync(write_map_, MaxFileSize, MS_SYNC);
+            munmap(write_map_, MaxFileSize);
+            write_map_ = MAP_FAILED;
+        }
+    }
+    
+    string ReadValue(const tuple<uint64_t, uint64_t, uint64_t>& location) {
+        uint64_t fileID, offset, size;
+        tie(fileID, offset, size) = location;
+
+        // 检查是否需要重新映射文件
+        if (fileID != read_map_fileID_) {
+            if (read_map_ != MAP_FAILED) {
+                munmap(read_map_, MaxFileSize);
+                read_map_ = MAP_FAILED;
+            }
+            OpenAndMapReadFile(fileID);
+            read_map_fileID_ = fileID;
+        }
+
+        // 从映射区域读取数据
+        string line(static_cast<char*>(read_map_) + offset, size);
+
+        stringstream ss(line);
+        string temp, value;
+
+        getline(ss, temp, ',');  // 版本号
+        getline(ss, temp, ',');  // 键
+        getline(ss, value);      // 值
+
+        return value;
     }
 
-    file << version_str << "," << key << "," << value << "\n";
+private:
+    struct WriteTask {
+        unique_ptr<string> record_ptr;  // 使用unique_ptr存储字符串指针
+        int fileID;
+        size_t offset;
+        size_t size;
+    };
 
-    tuple<uint64_t, uint64_t, uint64_t> location(current_fileID_,
-                                                 current_offset_, record_size);
+    string file_path_;
+    const uint64_t MaxFileSize = 64 * 1024 * 1024; // 64MB
+    moodycamel::BlockingConcurrentQueue<WriteTask, moodycamel::ConcurrentQueueDefaultTraits> write_queue_;
+    thread write_thread_;
+    atomic<int> current_fileID_;
+    atomic<size_t> current_offset_;
+    void* write_map_;
+    void* read_map_;
+    int64_t read_map_fileID_;
+    atomic<bool> stop_flag_;
+    int fileID = 0;  // 用于跟踪当前文件ID
+    void OpenAndMapWriteFile() {
+        string filename = file_path_ + to_string(fileID) + ".dat";
 
-    current_offset_ += record_size;  // update current offset
+        // 打开或创建文件
+        int fd = open(filename.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (fd == -1) {
+            throw runtime_error("Cannot open or create file: " + filename);
+        }
 
-    file.close();
+        // 确保文件至少有 MaxFileSize 大小
+        ftruncate(fd, MaxFileSize);
 
-    return location;
-  }
+        // 内存映射文件为写映射区域
+        write_map_ = mmap(nullptr, MaxFileSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (write_map_ == MAP_FAILED) {
+            close(fd);
+            throw runtime_error("Memory map for writing failed: " + filename);
+        }
 
-  // vector<tuple<uint64_t, uint64_t, uint64_t>> WriteValues(
-  //     uint64_t version, const vector<string>& key,
-  //     const vector<string>& value) {  // append a new record to the log
-  //     stream
-  //   string version_str = to_string(version);
-  //   size_t record_size =
-  //       version_str.size() + key[0].size() + value[0].size() + 3;
-  //   if (current_offset_ + record_size * key.size() > MaxFileSize) {
-  //     current_fileID_++;
-  //     current_offset_ = 0;
-  //   }
-
-  //   ofstream file(
-  //       file_path_ + "data_file_" + to_string(current_fileID_) + ".dat",
-  //       ios::app);  // create or open the file for appending
-  //   if (!file) {
-  //     throw std::runtime_error("Cannot open file ");
-  //   }
-
-  //   string content = "";
-  //   vector<tuple<uint64_t, uint64_t, uint64_t>> locations;
-  //   for (int i = 0; i < key.size(); i++) {
-  //     content += version_str + "," + key[i] + "," + value[i] + "\n";
-  //     current_offset_ += record_size;
-  //     locations.push_back(
-  //         make_tuple(current_fileID_, current_offset_, record_size));
-  //   }
-
-  //   file << content;
-
-  //   file.close();
-
-  //   return locations;
-  // }
-
-  string ReadValue(const tuple<uint64_t, uint64_t, uint64_t>& location) {
-    // std::shared_lock<std::shared_mutex> lock(mutex_);
-    uint64_t fileID, offset, size;
-    tie(fileID, offset, size) = location;
-
-    // 检查是否需要重新映射文件
-    if (fileID != read_map_fileID_) {
-      if (read_map_ != MAP_FAILED) {
-        munmap(read_map_, MaxFileSize);
-        read_map_ = MAP_FAILED;
-      }
-      OpenAndMapReadFile(fileID);
-      read_map_fileID_ = fileID;
+        close(fd);
     }
 
-    // 从映射区域读取数据
-    string line(static_cast<char*>(read_map_) + offset, size);
+    void OpenAndMapReadFile(uint64_t fileID) {
+        string filename = file_path_ + to_string(fileID) + ".dat";
+        while (!filesystem::exists(filename)) {  // 需要 #include <filesystem>
+            if (stop_flag_.load()) {
+                throw runtime_error("File not found and stop flag set: " + filename);
+            }
+            this_thread::sleep_for(chrono::milliseconds(10));  // 短暂等待后重试
+        }
+        // 打开文件
+        int fd = open(filename.c_str(), O_RDONLY);
+        if (fd == -1) {
+            throw runtime_error("Cannot open file for reading: " + filename);
+        }
 
-    stringstream ss(line);
-    string temp, value;
+        // 直接映射MaxFileSize文件大小
+        read_map_ = mmap(nullptr, MaxFileSize, PROT_READ, MAP_SHARED, fd, 0);
+        if (read_map_ == MAP_FAILED) {
+            close(fd);
+            throw runtime_error("Memory map for reading failed: " + filename);
+        }
 
-    getline(ss, temp, ',');  // 版本号
-    getline(ss, temp, ',');  // 键
-    getline(ss, value);      // 值
-
-    return value;
-  }
-
-  string ReadValueV1(const tuple<uint64_t, uint64_t, uint64_t>& location) {
-    uint64_t fileID, offset, size;
-    tie(fileID, offset, size) = location;
-
-    ifstream file(file_path_  + to_string(fileID) + ".dat");
-    if (!file) {
-      throw runtime_error("Cannot open file");
+        close(fd);
     }
-
-    file.seekg(offset, ios::beg);  // locate the correct offset
-
-    string line;
-    getline(file, line);
-
-    stringstream ss(line);
-    string temp, value;
-
-    getline(ss, temp, ',');
-    getline(ss, temp, ',');
-    getline(ss, value);
-
-    file.close();
-
-    return value;
-  }
-
-  // string ReadValueFromBuffer(
-  //     const tuple<uint64_t, uint64_t, uint64_t>& location) {
-  //   cout << "#";
-  //   uint64_t fileID, offset, size;
-  //   tie(fileID, offset, size) = location;
-  //   if (fileID == buffer_fileID_ && offset >= buffer_offset_ &&
-  //       offset < buffer_offset_ + BufferSize) {  // hit the buffer
-  //     string record = buffer_.substr(offset - buffer_offset_, size);
-  //     stringstream ss(record);
-  //     string temp, value;
-  //     getline(ss, temp, ',');
-  //     getline(ss, temp, ',');
-  //     getline(ss, value);
-  //     return value;
-  //   }
-
-  //   ifstream file(file_path_ + "data_file_" + to_string(fileID) + ".dat");
-  //   if (!file) {
-  //     throw runtime_error("Cannot open file");
-  //   }
-
-  //   file.seekg(0, file.end);
-  //   uint64_t length = (uint64_t)file.tellg();
-  //   uint64_t read_size = min(MaxBufferSize, length - offset);
-  //   file.seekg(offset, ios::beg);  // locate the correct offset
-  //   buffer_ = string(read_size, '\0');
-  //   file.read(&buffer_[0], read_size);  // read a buffer of data
-  //   buffer_fileID_ = fileID;
-  //   buffer_offset_ = offset;
-  //   BufferSize = read_size;
-
-  //   file.close();
-  //   string record = buffer_.substr(0, size);
-
-  //   stringstream ss(record);
-  //   string temp, value;
-  //   getline(ss, temp, ',');
-  //   getline(ss, temp, ',');
-  //   getline(ss, value);
-
-  //   return value;
-  // }
-
- private:
-  string file_path_;
-  uint64_t current_fileID_;
-  // std::atomic<uint64_t> current_offset_;
-  uint64_t current_offset_;
-  const uint64_t MaxFileSize = 64 * 1024 * 1024;  // 64MB
-  // string buffer_;
-  // int64_t buffer_fileID_;
-  // int64_t buffer_offset_;
-  // const uint64_t MaxBufferSize = 12 * 1024 * 1024;  // 12MB
-  // uint64_t BufferSize;
-  void* write_map_;
-  void* read_map_;
-  int64_t read_map_fileID_;
-  std::shared_mutex mutex_;
-
-  void OpenAndMapWriteFile() {
-    string filename =
-        file_path_ + to_string(current_fileID_) + ".dat";
-
-    // 打开或创建文件
-    int fd = open(filename.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    if (fd == -1) {
-      throw runtime_error("Cannot open or create file: " + filename);
-    }
-
-    // 确保文件至少有 MaxFileSize 大小
-    ftruncate(fd, MaxFileSize);
-
-    // 内存映射文件为写映射区域
-    write_map_ =
-        mmap(nullptr, MaxFileSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (write_map_ == MAP_FAILED) {
-      close(fd);
-      throw runtime_error("Memory map for writing failed: " + filename);
-    }
-
-    // 关闭文件描述符，因为已经映射了文件
-    close(fd);
-  }
-
-  void OpenAndMapReadFile(uint64_t fileID) {
-    string filename = file_path_ + to_string(fileID) + ".dat";
-
-    // 打开文件
-    int fd = open(filename.c_str(), O_RDONLY);
-    if (fd == -1) {
-      throw runtime_error("Cannot open file for reading: " + filename);
-    }
-
-    // // 获取文件大小
-    // struct stat sb;
-    // if (fstat(fd, &sb) == -1) {
-    //     close(fd);
-    //     throw runtime_error("Cannot get file size: " + filename);
-    // }
-    // // 内存映射文件为读映射区域，根据实际文件大小映射
-    // read_map_ = mmap(nullptr, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-
-    // 直接映射MaxFileSize文件大小
-    read_map_ = mmap(nullptr, MaxFileSize, PROT_READ, MAP_SHARED, fd, 0);
-    if (read_map_ == MAP_FAILED) {
-      close(fd);
-      throw runtime_error("Memory map for reading failed: " + filename);
-    }
-
-    // 关闭文件描述符，因为已经映射了文件
-    close(fd);
-  }
 };
-
 #endif
