@@ -48,7 +48,7 @@ auto CompareStrings = [](const std::string &a, const std::string &b) {
 };
 
 // convert hexadecimal digit to corresponding index 0~15
-int GetIndex(char ch) {
+inline int GetIndex(char ch) {
   if (isdigit(ch)) {
     return ch - '0';
   } else if (ch >= 'a' && ch <= 'f') {
@@ -1190,25 +1190,25 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
     DeltaPage* deltapage = GetDeltaPage(pid);
       // page_store_->GetActiveDeltaPage(pid);
 
-    if (2 * it.second.size() + deltapage->GetDeltaPageUpdateCount() >=
-        2 * Td_) {
-      // the updates in page is more than the capacity of two deltapages
-      if_exceed = true;
-      if (deltapage->GetDeltaPageUpdateCount() != 0) {
-        PageKey deltapage_pagekey = {version, 0, true, pagekey.pid};
+    // if (2 * it.second.size() + deltapage->GetDeltaPageUpdateCount() >=
+    //     2 * Td_) {
+    //   // the updates in page is more than the capacity of two deltapages
+    //   // if_exceed = true;
+    //   if (deltapage->GetDeltaPageUpdateCount() != 0) {
+    //     PageKey deltapage_pagekey = {version, 0, true, pagekey.pid};
 
-        DeltaPage *deltapage_copy = new DeltaPage(*deltapage);
-        deltapage_copy->SetPageKey(deltapage_pagekey);
-        deltapage_copy->SerializeTo();
-        // store frozen deltapage in cache
-        WritePageCache(deltapage_pagekey, deltapage_copy);
+    //     DeltaPage *deltapage_copy = new DeltaPage(*deltapage);
+    //     deltapage_copy->SetPageKey(deltapage_pagekey);
+    //     deltapage_copy->SerializeTo();
+    //     // store frozen deltapage in cache
+    //     WritePageCache(deltapage_pagekey, deltapage_copy);
 
-        deltapage->ClearDeltaPage();  // delete all DeltaItems in DeltaPage
-        // record the PageKey of DeltaPage passed to LSVPS
-        deltapage->SetLastPageKey(deltapage_pagekey);
-        AddDeltaPageVersion(pagekey.pid, version);
-      }
-    }
+    //     deltapage->ClearDeltaPage();  // delete all DeltaItems in DeltaPage
+    //     // record the PageKey of DeltaPage passed to LSVPS
+    //     deltapage->SetLastPageKey(deltapage_pagekey);
+    //     AddDeltaPageVersion(pagekey.pid, version);
+    //   }
+    // }
 
     for (const auto &nibbles : it.second) {
       // path is key when page is leaf page, pid of child page when page is
@@ -1257,9 +1257,9 @@ void DMMTrie::CalcRootHash(uint64_t tid, uint64_t version) {
   // for (const auto &it : active_deltapages) {
   //   page_store_->StoreActiveDeltaPage(it.second);
   // }
-  for (auto &pair : page_cache_) {
-    delete pair.second;
-  }
+  // for (auto &pair : page_cache_) {
+  //   delete pair.second;
+  // }
   page_cache_.clear();
   put_cache_.clear();
 #ifdef DEBUG
