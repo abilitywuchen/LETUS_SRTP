@@ -40,12 +40,12 @@ string HashFunction(const string &input) {  // hash function SHA-256
   return string(reinterpret_cast<char *>(hash), hash_len);
 }
 
-auto CompareStrings = [](const std::string &a, const std::string &b) {
-  if (a.size() != b.size()) {
-    return a.size() > b.size();  // first compare length
-  }
-  return a < b;  // then compare alphabetical order
-};
+// auto CompareStrings = [](const std::string &a, const std::string &b) {
+//   if (a.size() != b.size()) {
+//     return a.size() > b.size();  // first compare length
+//   }
+//   return a < b;  // then compare alphabetical order
+// };
 
 void Node::CalculateHash() {}
 void Node::AddChild(int index, Node *child, uint64_t version,

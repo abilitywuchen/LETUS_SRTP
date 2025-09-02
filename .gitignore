@@ -1,0 +1,59 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# log
+*.log
+
+# data
+*.dat
+*.delta
+
+# MacOS
+.DS_Store
+
+
+# flamegraph
+*.data
+*.data.old
+*.folded
+
+# folders
+.vscode/
+build/
+build_debug/
+build_release/
+index/
+bak/
+data/
+results/
+FlameGraph/

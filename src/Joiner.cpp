@@ -88,7 +88,8 @@ void Joiner::WriteAllBufferItems() {
 
     if (page == nullptr) {
         // GetPage returns nullptr means that the pid is new
-        page = new BasePage(this, nullptr, pid);
+        // page = new BasePage(this, nullptr, pid);
+        page = new(pool_.allocate()) BasePage(this, nullptr, pid);
         // PrintLog("Creating new page " + pid);
         // page = pool_.allocate();
         //   page->SetAttribute(this, nullptr, pid);
