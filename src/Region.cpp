@@ -14,8 +14,8 @@ VDLS* Region::GetValueStore() {
 }
 void Region::run() {
     // PrintLog(string("Nibble Bucket Address:") + to_string(reinterpret_cast<uintptr_t>(this->nibble_buckets_)));
-    while (!stop_) {
-        auto task = queue_.popTask();
+    std::tuple<uint64_t, std::string, std::string> task;
+    while (queue_.popTask(task)&&!stop_) {
         if (get<0>(task) != 0) {
 #ifdef REGION_LOG 
             PrintLog("Pop Task [" + to_string(get<0>(task)) + "-" + get<1>(task) + "-" + get<2>(task) + "]");
