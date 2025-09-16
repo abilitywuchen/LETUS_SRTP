@@ -1,6 +1,6 @@
 #!/bin/bash
 # 性能测试参数设置
-region=64                # 测试区域名
+region=6                # 测试区域名
 keylen=16                 # key长度
 kvpair=100000             # kv对数量
 version=16                # 版本号
@@ -8,7 +8,7 @@ data_path="$PWD/../data/"   # 数据目录
 index_path="$PWD/../index"  # 索引目录
 
 # 生成参数标识符，用于文件命名
-param_suffix="new_region${region}_keylen${keylen}_kvpair${kvpair}_version${version}"
+param_suffix="blocking_region${region}_keylen${keylen}_kvpair${kvpair}_version${version}"
 timestamp=$(date +%Y%m%d_%H%M%S)  # 添加时间戳
 
 cd ../                    # 切换到项目根目录

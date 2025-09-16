@@ -11,7 +11,7 @@ EXE=./build_debug/bin/put_obs # 路径
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULT_FILE="test_results_${TIMESTAMP}.txt"
 
-exec > >(tee "$RESULT_FILE") 2>&
+exec > >(tee "$RESULT_FILE") 2>&1
 echo "开始性能测试..."
 echo "测试参数: ${ARGS[*]}"
 echo "每次测试 $N 次"

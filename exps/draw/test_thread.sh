@@ -8,12 +8,12 @@ KEY_LEN=16           # Key长度
 KVPAIRS=100000       # KV对数/提交
 COMMITS=16           # 提交次数
 BASELINE_TIME=95.03   # 基准线(秒)
-SAMPLING_STEP=1      # 采样步长：1 表示所有点，>1 表示隔 N 个点采样（不会覆盖原始全量数据）
+SAMPLING_STEP=5      # 采样步长：1 表示所有点，>1 表示隔 N 个点采样（不会覆盖原始全量数据）
 
 # === 线程范围 ===
-MIN_THREADS=28       # 最小线程数 (对应MAX_REGION_NUM)
-MAX_THREADS=29       # 最大线程数 (对应MAX_REGION_NUM)
-STEP=1               # 采样间隔 (1=测所有点, 2=每隔1个测, 3=每隔2个测)
+MIN_THREADS=1       # 最小线程数 (对应MAX_REGION_NUM)
+MAX_THREADS=64       # 最大线程数 (对应MAX_REGION_NUM)
+STEP=5               # 采样间隔 (1=测所有点, 2=每隔1个测, 3=每隔2个测)
 REPEAT_PER_THREAD=2  # 每线程重复次数
 
 # === 调试选项 ===
@@ -104,6 +104,7 @@ done
 # 生成图表
 echo "生成性能图表..."
 # 如果存在全量数据并且当前是采样文件，传入 --sampled 参数以在图上叠加采样点
+# 采样文件现在也支持多组数据（空行分隔），方便在之前的测试结果上继续添加新测试
 if [ "$SAMPLING_STEP" -gt 1 ] && [ -f "$FULL_RESULTS_FILE" ]; then
     python3 "$SCRIPT_DIR/draw_thread_picture.py" --input "$FULL_RESULTS_FILE" --sampled "$RESULTS_FILE" --output "$PLOT_OUTPUT" --baseline "$BASELINE_TIME" --title "Thread Performance Test (sample step ${SAMPLING_STEP})"
 else
