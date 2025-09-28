@@ -14,22 +14,22 @@ param_suffix="newnewnew_region${region}_keylen${keylen}_kvpair${kvpair}_version$
 timestamp=$(date +%Y%m%d_%H%M%S)
 
 # --- 准备工作 ---
-cd ../
+cd ../../
 ./build_debug.sh --cxx g++
-cd exps/
+cd exps/perf/
 mkdir -p results
 
 # 清理并创建数据和索引目录
-rm -rf "../data/"
-mkdir -p "../data/"
-rm -rf "../index"
-mkdir -p "../index"
+rm -rf "../../data/"
+mkdir -p "../../data/"
+rm -rf "../../index"
+mkdir -p "../../index"
 
 # set -x
 
 # --- 性能采样 ---
 # 1. 采样：以子进程方式运行被测程序（采集该进程的所有线程）
-sudo perf record -g -F 99 ../build_debug/bin/put_obs "$region" "$keylen" "$kvpair" "$version"
+sudo perf record -g -F 99 ../../build_debug/bin/put_obs "$region" "$keylen" "$kvpair" "$version"
 
 # 2. 导出 perf.script_full 用于提取 PID/TID token
 sudo perf script -F pid,tid,comm > perf.script_full

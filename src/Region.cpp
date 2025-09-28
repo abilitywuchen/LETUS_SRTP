@@ -134,10 +134,10 @@ void Region::Commit(uint64_t version) {
     map<string, set<string>, decltype(CompareStrings)> updates(CompareStrings);
 
     for (const auto& it : put_cache_) {
-        // 从长度为4的nibbles开始 只生成这部分updates
+        // 从长度为6的nibbles开始 只生成这部分updates
         for (int i = it.first.size() % 2 == 0 ? it.first.size()
             : it.first.size() - 1;
-            i > 2; i -= 2) {
+            i > 4; i -= 2) {
             // store the pid and nibbles of each page updated in every put
             updates[it.first.substr(0, i)].insert(it.first.substr(i, 2));
         }
@@ -223,12 +223,12 @@ void Region::Commit(uint64_t version) {
     // PrintLog("Time taken to update page: " + to_string(duration.count()) + " microseconds");
     // start = chrono::system_clock::now();
     for (const auto& it : put_cache_) {
-        // 取前四位生成buffitem
-        std::string nibbles = it.first.substr(0, 4);
+        // 取前六位生成buffitem
+        std::string nibbles = it.first.substr(0, 6);
         // NibbleBucket* bucket = GetNibbleBucket(GetNibbleValue(nibbles));
         tuple<uint64_t, uint64_t, uint64_t> location;
         string value, child_hash;
-        if (nibbles.size() == 4) {  // indexnode + indexnode
+        if (nibbles.size() == 6) {  // indexnode + indexnode
             BasePage* base = GetPage({ version, 0, false, nibbles });
             child_hash = base->GetRoot()->GetHash();
         }

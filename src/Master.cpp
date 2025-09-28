@@ -167,7 +167,7 @@ std::string Master::Get(uint64_t tid, uint64_t version, const std::string& key) 
     for (int i = 0; i <= key.size(); i += 2) {
         string pid = nibble_path.substr(0, i);
         BasePage* page = nullptr;
-        if (i == 0 || i == 2)
+        if (i == 0 || i == 2 || i == 4)
             page = joiner_->GetPage({ page_version, 0, false, pid });  // false means basepage
         else
             page =
@@ -217,7 +217,7 @@ DMMTrieProof Master::GetProof(uint64_t tid, uint64_t version,
     for (int i = 0; i < key.size() + 1; i += 2) {
         string pid = nibble_path.substr(0, i);
         BasePage* page = nullptr;
-        if (i == 0 || i == 2)
+        if (i == 0 || i == 2 || i == 4)
             page = joiner_->GetPage({ page_version, 0, false, pid });  // false means basepage
         else {
             if (region_id >= MAX_REGION_NUM) {

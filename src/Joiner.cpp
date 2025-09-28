@@ -118,59 +118,69 @@ void Joiner::WriteAllBufferItems() {
     //           deltapage, pagekey);
     //   }
 
-    // 创建需要的2级页面
-    std::unordered_set<std::string> needed_pages;
-    for (const auto& item : buffer_) {
-        needed_pages.insert(item.nibbles_.substr(0, 2));
-    }
+    // 计算最大长度
+    size_t max_len = 6;
 
-    for (const auto &pid : needed_pages) {
-        uint64_t pre_version = GetPageVersion({0, 0, false, pid}).first;
-        PageKey old_pagekey = {pre_version, 0, false, pid};
-        PageKey new_pagekey = {version_, 0, false, pid};
-        
-        if (pre_version != 0) {
-            BasePage* old_page = GetPage(old_pagekey);
-            if (old_page != nullptr) {
-                UpdatePageKey(old_pagekey, new_pagekey);
-                continue;
+    // 逐层处理：从 max_len 开始，每次减少 2，直到达到 2（包含根页写入）
+    for (size_t layer_len = max_len; layer_len >= 2; layer_len -= 2) {
+        // 收集本层需要的子页 pid（layer_len - 2）
+        std::unordered_set<std::string> needed_pages;
+        size_t layer_original_size = buffer_.size();
+        size_t pid_len = layer_len - 2;
+        for (size_t i = 0; i < layer_original_size; ++i) {
+            const auto& item = buffer_[i];
+            if (item.nibbles_.size() != layer_len) continue;
+            // 根页面额外处理
+            if (pid_len == 0) continue;
+            needed_pages.insert(item.nibbles_.substr(0, pid_len));
+        }
+
+        // 为本次所需的 pid 创建或复用对应页
+        for (const auto &pid : needed_pages) {
+            uint64_t pre_version = GetPageVersion({0, 0, false, pid}).first;
+            PageKey old_pagekey = {pre_version, 0, false, pid};
+            PageKey new_pagekey = {version_, 0, false, pid};
+            if (pre_version != 0) {
+                BasePage* old_page = GetPage(old_pagekey);
+                if (old_page != nullptr) {
+                    UpdatePageKey(old_pagekey, new_pagekey);
+                    continue;
+                }
+            }
+            BasePage *page = GetPage(new_pagekey);
+            if (!page) {
+                Node *empty_root = new IndexNode(0, "", 0);
+                BasePage *newpage = new (pool_.allocate()) BasePage(this, empty_root, pid);
+                PutPage(new_pagekey, newpage);
             }
         }
 
-        BasePage *page = GetPage(new_pagekey);
-        if (!page) {
-            Node *empty_root = new IndexNode(0, "", 0);
-            BasePage *newpage = new (pool_.allocate()) BasePage(this, empty_root, pid);
-            PutPage(new_pagekey, newpage);
-        }
-    }
+        // 处理属于当前长度的条目，把它们写入对应子页，并生成上层条目
+        for (size_t i = 0; i < layer_original_size; ++i) {
+            const auto& item = buffer_[i];
+            if (item.nibbles_.size() != layer_len) continue;
 
-    size_t original_buffer_size = buffer_.size();
-    for (size_t i = 0; i < original_buffer_size; ++i) {
-        const auto& item = buffer_[i];
-        if (item.nibbles_.size() == 2){
-            break;
-        }
+            // 直接写入根页, 不生成上级条目
+            if (pid_len == 0) {
+                UpdatePageKey(old_pagekey, pagekey);
+                BasePage* target_root = GetPage(pagekey);
+                if (target_root) {
+                    target_root->UpdatePage(version_, item.location_, item.value_, item.nibbles_, item.child_hash_, deltapage, pagekey);
+                }
+                continue;
+            }
 
-        string pid = item.nibbles_.substr(0, 2);
-        PageKey target_pagekey = {version_, 0, false, pid};
-        BasePage* target_page = GetPage(target_pagekey);
-        if (target_page){
-            string nibbles = item.nibbles_.substr(2);
-            target_page->UpdatePage(version_, item.location_, item.value_, nibbles, item.child_hash_,
-                         deltapage, target_pagekey);
-            string child_hash = target_page->GetRoot()->GetHash();
-            BufferItem root_item(item.location_, "", item.nibbles_.substr(0,2), child_hash);
-            buffer_.push_back(root_item);
-        }
-    }
-    UpdatePageKey(old_pagekey, pagekey);
-
-    for (size_t i = original_buffer_size; i < buffer_.size(); ++i) {
-    const auto& item = buffer_[i];
-    BasePage* target_page = GetPage(pagekey);
-    if (target_page) {
-        target_page->UpdatePage(version_, item.location_, item.value_, item.nibbles_, item.child_hash_, deltapage, pagekey);
+            string pid = item.nibbles_.substr(0, pid_len);
+            PageKey target_pagekey = {version_, 0, false, pid};
+            BasePage* target_page = GetPage(target_pagekey);
+            if (target_page){
+                string nibbles = item.nibbles_.substr(pid_len);
+                target_page->UpdatePage(version_, item.location_, item.value_, nibbles, item.child_hash_, deltapage, target_pagekey);
+                string child_hash = target_page->GetRoot()->GetHash();
+                string upper_nibbles = pid;
+                BufferItem root_item(item.location_, "", upper_nibbles, child_hash);
+                buffer_.push_back(root_item);
+            }
         }
     }
     buffer_.clear();
