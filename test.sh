@@ -1,15 +1,17 @@
 #! /bin/bash
-N=3                 # 测试次数
+N=10                 # 测试次数
 ARGS=(64 16 100000 16)   # 参数
-EXE=./build_debug/bin/put_obs # 路径
+EXE=./build_release/bin/put_obs # 路径
 
 # 先确保可执行文件存在
-./build_debug.sh
+# ./build_debug.sh
+./build.sh
 [[ -x $EXE ]] || { echo "$EXE 不存在或不可执行"; exit 1; }
 
 # 创建结果文件
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-RESULT_FILE="test_results_${TIMESTAMP}.txt"
+mkdir -p ./results
+RESULT_FILE="./results/test_results_${TIMESTAMP}.txt"
 
 exec > >(tee "$RESULT_FILE") 2>&1
 echo "开始性能测试..."

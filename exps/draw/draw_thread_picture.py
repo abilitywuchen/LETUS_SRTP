@@ -127,8 +127,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input', required=True,
                         help='主曲线文件，可多空行分组')
-    parser.add_argument('--sampled', required=True,
-                        help='采样文件，可多空行分组')
+    parser.add_argument('--sampled', required=False,
+                        help='采样文件，可多空行分组（可选）')
     parser.add_argument('-o', '--output', required=True)
     parser.add_argument('-b', '--baseline', type=float, default=95.03)
     parser.add_argument('--title', default='')
@@ -155,7 +155,9 @@ def main():
     thread_nums = main_data[0][0]
     exec_times = [g[1] for g in main_data] if len(main_data) > 1 else main_data[0][1]
 
-    sampled_groups = read_results_multiple(args.sampled)
+    sampled_groups = []
+    if args.sampled:
+        sampled_groups = read_results_multiple(args.sampled)
 
     plot(thread_nums, exec_times,
          baseline=args.baseline,

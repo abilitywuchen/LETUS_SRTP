@@ -53,6 +53,9 @@ const std::string& GetNibble(uint8_t nibble_value) {
 // }
 
 Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(max_region_num),current_version_(0) {
+    ElementPool<BasePage>::init_shards(MAX_REGION_NUM);
+    ElementPool<DeltaPage>::init_shards(MAX_REGION_NUM);
+    PagePool::init_shards(MAX_REGION_NUM);
     regions_.reserve(MAX_REGION_NUM);
     value_store_ = new VDLS(data_path, "global");
     bottomup_buffers_ = vector<ConcurrentArray<pair<uint64_t, list<BufferItem>>>>(MAX_REGION_NUM);

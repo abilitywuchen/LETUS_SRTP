@@ -57,3 +57,4 @@ bak/
 data/
 results/
 FlameGraph/
+__pycache__/

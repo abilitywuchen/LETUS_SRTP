@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <vector>
+#include <memory>
 #include <unistd.h>
 #include <algorithm>
 #include <cstdint>
@@ -13,7 +14,7 @@ template <typename T>
 class GlobalShardedPool
 {
 private:
-    static constexpr size_t NUM_SHARDS = 16;
+    size_t num_shards_ = 64;
     static constexpr size_t INITIAL_SIZE = 4096;
     static constexpr size_t MAX_FREE_SIZE = 2048;
 
@@ -109,14 +110,19 @@ private:
         }
     };
 
-    Shard shards_[NUM_SHARDS];
+    std::unique_ptr<Shard[]> shards_;
     std::atomic<size_t> counter_{0};
 
 public:
+    GlobalShardedPool(size_t num_shards = 64) : num_shards_(num_shards)
+    {
+        shards_.reset(new Shard[num_shards_]);
+    }
+
     // Allocate a batch of objects, distributing across shards for load balancing
     void allocate_batch(T **output, size_t count)
     {
-        size_t shard_id = counter_.fetch_add(1, std::memory_order_relaxed) % NUM_SHARDS;
+        size_t shard_id = counter_.fetch_add(1, std::memory_order_relaxed) % num_shards_;
         Shard &shard = shards_[shard_id];
 
         shard.lock();
@@ -130,11 +136,12 @@ public:
         if (count == 0)
             return;
 
-        size_t items_per_shard = count / NUM_SHARDS;
-        size_t remaining = count % NUM_SHARDS;
+        size_t ns = num_shards_;
+        size_t items_per_shard = count / ns;
+        size_t remaining = count % ns;
         size_t input_index = 0;
 
-        for (size_t shard_id = 0; shard_id < NUM_SHARDS; ++shard_id)
+        for (size_t shard_id = 0; shard_id < ns; ++shard_id)
         {
             size_t shard_count = items_per_shard + (shard_id < remaining ? 1 : 0);
 
@@ -152,7 +159,7 @@ public:
     // Pre-allocate memory pools for all shards to reduce allocation latency
     void reserve()
     {
-        for (size_t i = 0; i < NUM_SHARDS; ++i)
+        for (size_t i = 0; i < num_shards_; ++i)
         {
             shards_[i].lock();
             if (shards_[i].capacity_ == 0)
@@ -239,10 +246,32 @@ template <typename T>
 class ElementPool : private ThreadLocalElementPool<T>
 {
 private:
-    static GlobalShardedPool<T> &getGlobalPool()
+    static GlobalShardedPool<T> *&getGlobalPoolPtr()
     {
-        static GlobalShardedPool<T> global_pool;
+        static GlobalShardedPool<T> *global_pool = nullptr;
         return global_pool;
+    }
+    static GlobalShardedPool<T> &getGlobalPool(size_t num_shards = 0)
+    {
+        auto &global_pool = getGlobalPoolPtr();
+        if (!global_pool)
+        {
+            if (num_shards == 0)
+                num_shards = 64;
+            global_pool = new GlobalShardedPool<T>(num_shards);
+        }
+        return *global_pool;
+    }
+
+public:
+    // 只允许主线程在多线程前调用，后续调用无效
+    static void init_shards(size_t num_shards)
+    {
+        auto &global_pool = getGlobalPoolPtr();
+        if (!global_pool)
+        {
+            global_pool = new GlobalShardedPool<T>(num_shards);
+        }
     }
 
 public:
@@ -260,9 +289,9 @@ public:
     }
 
     // Pre-allocate memory pools
-    static void reserve()
+    static void reserve(size_t num_shards = 0)
     {
-        getGlobalPool().reserve();
+        getGlobalPool(num_shards).reserve();
     }
 };
 
@@ -270,7 +299,7 @@ public:
 class GlobalShardedPagePool
 {
 private:
-    static constexpr size_t NUM_SHARDS = 16;
+    size_t num_shards_ = 64;
     static constexpr size_t INITIAL_SIZE = 16384;
     static constexpr size_t MAX_FREE_SIZE = 8192;
     static constexpr size_t PAGE_SIZE = 4096;
@@ -363,13 +392,18 @@ private:
         }
     };
 
-    Shard shards_[NUM_SHARDS];
+    std::unique_ptr<Shard[]> shards_;
     std::atomic<size_t> counter_{0};
 
 public:
+    GlobalShardedPagePool(size_t num_shards = 64) : num_shards_(num_shards)
+    {
+        shards_.reset(new Shard[num_shards_]);
+    }
+
     void allocate_batch(char **output, size_t count)
     {
-        size_t shard_id = counter_.fetch_add(1, std::memory_order_relaxed) % NUM_SHARDS;
+        size_t shard_id = counter_.fetch_add(1, std::memory_order_relaxed) % num_shards_;
         Shard &shard = shards_[shard_id];
 
         shard.lock();
@@ -382,11 +416,12 @@ public:
         if (count == 0)
             return;
 
-        size_t items_per_shard = count / NUM_SHARDS;
-        size_t remaining = count % NUM_SHARDS;
+        size_t ns = num_shards_;
+        size_t items_per_shard = count / ns;
+        size_t remaining = count % ns;
         size_t input_index = 0;
 
-        for (size_t shard_id = 0; shard_id < NUM_SHARDS; ++shard_id)
+        for (size_t shard_id = 0; shard_id < ns; ++shard_id)
         {
             size_t shard_count = items_per_shard + (shard_id < remaining ? 1 : 0);
 
@@ -404,7 +439,7 @@ public:
     // Pre-allocate page pools for all shards
     void reserve()
     {
-        for (size_t i = 0; i < NUM_SHARDS; ++i)
+        for (size_t i = 0; i < num_shards_; ++i)
         {
             shards_[i].lock();
             if (shards_[i].capacity_ == 0)
@@ -487,10 +522,32 @@ public:
 class PagePool : private ThreadLocalPagePool
 {
 private:
-    static GlobalShardedPagePool &getGlobalPool()
+    static GlobalShardedPagePool *&getGlobalPoolPtr()
     {
-        static GlobalShardedPagePool global_pool;
+        static GlobalShardedPagePool *global_pool = nullptr;
         return global_pool;
+    }
+    static GlobalShardedPagePool &getGlobalPool(size_t num_shards = 0)
+    {
+        auto &global_pool = getGlobalPoolPtr();
+        if (!global_pool)
+        {
+            if (num_shards == 0)
+                num_shards = 64;
+            global_pool = new GlobalShardedPagePool(num_shards);
+        }
+        return *global_pool;
+    }
+
+public:
+    // 只允许主线程在多线程前调用，后续调用无效
+    static void init_shards(size_t num_shards)
+    {
+        auto &global_pool = getGlobalPoolPtr();
+        if (!global_pool)
+        {
+            global_pool = new GlobalShardedPagePool(num_shards);
+        }
     }
 
 public:
