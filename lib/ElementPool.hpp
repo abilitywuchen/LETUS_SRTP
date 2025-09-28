@@ -14,7 +14,7 @@ template <typename T>
 class GlobalShardedPool
 {
 private:
-    size_t num_shards_ = 64;
+    size_t num_shards_ = 1;
     static constexpr size_t INITIAL_SIZE = 4096;
     static constexpr size_t MAX_FREE_SIZE = 2048;
 
@@ -299,7 +299,7 @@ public:
 class GlobalShardedPagePool
 {
 private:
-    size_t num_shards_ = 64;
+    size_t num_shards_ = 1;
     static constexpr size_t INITIAL_SIZE = 16384;
     static constexpr size_t MAX_FREE_SIZE = 8192;
     static constexpr size_t PAGE_SIZE = 4096;

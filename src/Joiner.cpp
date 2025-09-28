@@ -1,6 +1,7 @@
 #include "Joiner.hpp"
 #include "DMMTrie.hpp"
 #include <chrono>
+#include <unordered_set>
 
 Joiner::Joiner(Master* master) : master_(master) {
     joiner_thread_ = thread(std::bind(&Joiner::run, this));
@@ -89,7 +90,8 @@ void Joiner::WriteAllBufferItems() {
     if (page == nullptr) {
         // GetPage returns nullptr means that the pid is new
         // page = new BasePage(this, nullptr, pid);
-        page = new(pool_.allocate()) BasePage(this, nullptr, pid);
+        Node *empty_root = new IndexNode(0, "", 0);
+        page = new (pool_.allocate()) BasePage(this, empty_root, pid);
         // PrintLog("Creating new page " + pid);
         // page = pool_.allocate();
         //   page->SetAttribute(this, nullptr, pid);
@@ -116,12 +118,61 @@ void Joiner::WriteAllBufferItems() {
     //           deltapage, pagekey);
     //   }
 
+    // 创建需要的2级页面
+    std::unordered_set<std::string> needed_pages;
     for (const auto& item : buffer_) {
-        page->UpdatePage(version_, item.location_, item.value_, item.nibbles_, item.child_hash_,
-            deltapage, pagekey);
+        needed_pages.insert(item.nibbles_.substr(0, 2));
+    }
+
+    for (const auto &pid : needed_pages) {
+        uint64_t pre_version = GetPageVersion({0, 0, false, pid}).first;
+        PageKey old_pagekey = {pre_version, 0, false, pid};
+        PageKey new_pagekey = {version_, 0, false, pid};
+        
+        if (pre_version != 0) {
+            BasePage* old_page = GetPage(old_pagekey);
+            if (old_page != nullptr) {
+                UpdatePageKey(old_pagekey, new_pagekey);
+                continue;
+            }
+        }
+
+        BasePage *page = GetPage(new_pagekey);
+        if (!page) {
+            Node *empty_root = new IndexNode(0, "", 0);
+            BasePage *newpage = new (pool_.allocate()) BasePage(this, empty_root, pid);
+            PutPage(new_pagekey, newpage);
+        }
+    }
+
+    size_t original_buffer_size = buffer_.size();
+    for (size_t i = 0; i < original_buffer_size; ++i) {
+        const auto& item = buffer_[i];
+        if (item.nibbles_.size() == 2){
+            break;
+        }
+
+        string pid = item.nibbles_.substr(0, 2);
+        PageKey target_pagekey = {version_, 0, false, pid};
+        BasePage* target_page = GetPage(target_pagekey);
+        if (target_page){
+            string nibbles = item.nibbles_.substr(2);
+            target_page->UpdatePage(version_, item.location_, item.value_, nibbles, item.child_hash_,
+                         deltapage, target_pagekey);
+            string child_hash = target_page->GetRoot()->GetHash();
+            BufferItem root_item(item.location_, "", item.nibbles_.substr(0,2), child_hash);
+            buffer_.push_back(root_item);
+        }
     }
     UpdatePageKey(old_pagekey, pagekey);
 
+    for (size_t i = original_buffer_size; i < buffer_.size(); ++i) {
+    const auto& item = buffer_[i];
+    BasePage* target_page = GetPage(pagekey);
+    if (target_page) {
+        target_page->UpdatePage(version_, item.location_, item.value_, item.nibbles_, item.child_hash_, deltapage, pagekey);
+        }
+    }
     buffer_.clear();
     // PrintLog("Version " + to_string(version_) + " committed");
 }
