@@ -58,10 +58,10 @@ typedef struct KVPair
 
 
 int main(int argc, char* argv[]) {
-    std::string index_path = "~/letus/";
+    std::string index_path = "/home/xuwenhao/DMMTree/";
     // LSVPS* page_store = new LSVPS(index_path);
     std::string data_path;
-    data_path = "~/letus/data/";//your own path
+    data_path = "/home/xuwenhao/DMMTree/data/";//your own path
     // VDLS* value_store = new VDLS(data_path);
     size_t max_region_num = atoi(argv[1]);
     size_t key_len = atoi(argv[2]);
