@@ -24,7 +24,7 @@ class Joiner : Worker{
     bool WaitForOldVersion(uint64_t version);
     VDLS* GetValueStore();
     void WriteAllBufferItems();
-
+    uint64_t GetVersion(){ return version_;}
     void run();
 
     void Stop();

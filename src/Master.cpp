@@ -52,11 +52,12 @@ const std::string& GetNibble(uint8_t nibble_value) {
 //     }
 // }
 
-Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(max_region_num),current_version_(0) {
+Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(max_region_num) {
     regions_.reserve(MAX_REGION_NUM);
     value_store_ = new VDLS(data_path, "global");
     //page_store_ = new LSVPS(data_path, "LSVPS");
     bottomup_buffers_ = vector<ConcurrentArray<pair<uint64_t, list<BufferItem>>>>(MAX_REGION_NUM);
+    region_stop_flags_ = vector<int>(MAX_REGION_NUM, 0);
     //给各个Region分配nibble字典
     for (uint8_t i = 0; i < MAX_REGION_NUM; i++) {
         // PrintLog("Creating Region " + to_string(i));
@@ -128,9 +129,11 @@ void Master::Commit(uint64_t version) {
 }
 
 
-void  Master::AddDeltaPageVersion(const string& pid, uint64_t version) {
-    deltapage_versions_[pid].push_back(version);//pid索引版本更新
-}
+//void  Master::AddDeltaPageVersion(const string& pid, uint64_t version) {
+//    mtx_.lock();
+//    deltapage_versions_[pid].push_back(version);//pid索引版本更新
+//    mtx_.unlock();
+//}
 
 // 读取操作
 std::string Master::Get(uint64_t tid, uint64_t version, const std::string& key) {
@@ -160,24 +163,25 @@ std::string Master::Get(uint64_t tid, uint64_t version, const std::string& key) 
     //   }
     uint8_t region_id = nibble_dict_[nibble_value];
     if (region_id >= MAX_REGION_NUM) {
-        cout << "Key " << key << " not found at version " << version << endl;
+        cout << "Key " << key << " not found at version0 " << version << endl;
         return "";
     }
     // 寻找leafNode
-    for (int i = 0; i <= key.size(); i += 2) {
+    for (int i = 2; i <= key.size(); i += 2) {
         string pid = nibble_path.substr(0, i);
         BasePage* page = nullptr;
-        if (i == 0)
-            page = joiner_->GetPage({ page_version, 0, false, pid });  // false means basepage
-        else
-            page =
-            regions_[region_id]->GetPage({ page_version, 0, false, pid });  // false means basepage
-        if (page == nullptr) {
-            cout << "Key " << key << " not found at version " << version << endl;
+        page = regions_[region_id]->GetPage({ page_version, 0, false, pid });  // false means basepage
+        if (page == nullptr || page->GetRoot() == nullptr) {
+            cout << "Key " << key << " not found at version1 " << version << endl;
             return "";
         }
 
         if (!page->GetRoot()->IsLeaf()) {  // first level in page is indexnode
+            if (!page->GetRoot()->HasChild(GetIndex(nibble_path[i]))) {
+                cout << "Child not found" << endl;
+                cout << "Key " << key << " not found at version2 " << version << endl;
+                return "";
+            }
             if (!page->GetRoot()->GetChild(GetIndex(nibble_path[i]))->IsLeaf()) {
                 // second level is indexnode
                 page_version = page->GetRoot()
@@ -271,7 +275,20 @@ void Master::Stop() {
     joiner_->Stop();
     for (auto& region : regions_) {
         region->postTask(make_tuple(0, "<STOP>", ""));
+        //region->Join();
     }
+    while(1){
+        bool all_stopped = true;
+        for(int i=0;i<MAX_REGION_NUM;i++) {
+            if(region_stop_flags_[i] == 0) {
+                all_stopped = false;
+                break;
+            }
+        }
+        if(all_stopped) break;
+        std::this_thread::yield();
+    }
+    return;
     // while(true)
     // if (joiner_->stopped_) return;
 #ifdef MASTER_LOG
@@ -284,9 +301,10 @@ void Master::WaitForCommit(uint64_t version) {
         std::this_thread::yield();
     }
 }
-void Master::Flush() {
-    for(int i=0;i<MAX_REGION_NUM;i++) {
-        regions_[i]->Flush();
-    }
-    joiner_->Flush();
+uint64_t Master::GetCommitVersion(){
+    return joiner_->GetVersion();
+}
+void Master::MasterStop(size_t region_id){
+    region_stop_flags_[region_id] = 1;
+    return;
 }

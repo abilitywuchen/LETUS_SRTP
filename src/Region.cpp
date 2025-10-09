@@ -44,6 +44,7 @@ void Region::run() {
 #ifdef REGION_LOG 
             PrintLog("Pop Task [STOP]");
 #endif
+            Flush();
             Stop();
 
             // PrintLog("Pop Task [" + to_string(get<0>(task)) + "-" + get<1>(task) + "-" + get<2>(task) + "]");
@@ -94,7 +95,7 @@ void Region::Put(tuple<uint64_t, string, string> kvpair) {
     string key;
     string value;
     tie(version, key, value) = kvpair;
-    if (version < region_version_) {
+    if (version < current_version_) {
         cout << "Version " << version << " is outdated!"
             << endl;  // version invalid
         return;
@@ -104,7 +105,7 @@ void Region::Put(tuple<uint64_t, string, string> kvpair) {
         return;
     }
     // 将put操作缓存到put_cache_中
-    region_version_ = version;
+    current_version_ = version;
     put_cache_[key] = value;
     return;
 }
@@ -112,10 +113,11 @@ void Region::Put(tuple<uint64_t, string, string> kvpair) {
 
 void Region::Commit(uint64_t version) { //commit版本version
     if (version < commited_version_) {
-        PrintLog("Commit version incompatible");
+        //PrintLog("Commit version incompatible");
+        cout<< "Commit Version incompatible"<<endl;
         return;
     }
-    if (version > region_version_) {
+    if (version > current_version_) {
         // PrintLog("Buffer Size: " + to_string(buffer_.size()));
         for (uint64_t i = buffer_.back().first + 1; i <= version; i++) {
             PrintLog("Pushing empty buffer for version " + to_string(i));
@@ -124,13 +126,13 @@ void Region::Commit(uint64_t version) { //commit版本version
 #ifdef REGION_LOG 
         PrintLog("During Commit, Force updated to version " + to_string(version));
 #endif
-        region_version_ = version;
+        current_version_ = version;
     }
 
-    chrono::time_point<chrono::system_clock> start;
-    chrono::time_point<chrono::system_clock> end;
-    vector<chrono::microseconds> durations;
-    durations.resize(3, chrono::microseconds(0));
+    //chrono::time_point<chrono::system_clock> start;
+    //chrono::time_point<chrono::system_clock> end;
+    //vector<chrono::microseconds> durations;
+    //durations.resize(3, chrono::microseconds(0));
     // start = chrono::system_clock::now();
     //按照key的字符串大小排列顺序给出哈希表（key为string，value为set<string>）
     //该哈希表存储每个put操作中更新的页面的pid
@@ -139,7 +141,7 @@ void Region::Commit(uint64_t version) { //commit版本version
     for (const auto& it : put_cache_) { // 遍历put_cache_中的所有键值对
         for (int i = it.first.size() % 2 == 0 ? it.first.size() //取nibbles
             : it.first.size() - 1;
-            i > 0; i -= 2) {
+            i >= 0; i -= 2) {
             // store the pid and nibbles of each page updated in every put
             updates[it.first.substr(0, i)].insert(it.first.substr(i, 2)); //存储需要更新的页面Id
         }
@@ -152,14 +154,14 @@ void Region::Commit(uint64_t version) { //commit版本version
          for (const auto &it : put_cache_) {
             for (int i = it.first.size() % 2 == 0 ? it.first.size()
                                          : it.first.size() - 1;
-                i > 0; i -= 2) {
+                i >= 0; i -= 2) {
              pids.insert(it.first.substr(0, i));
            }
          }
         // for(string pid : pids) {
         //    active_deltapages_[pid]=page_store_->GetActiveDeltaPage(pid);
         // }
-    size_t cnt = 0;
+    //size_t cnt = 0;
     // start = chrono::system_clock::now();
     //对每个更新的页面进行处理
     for (const auto& it : updates) {
@@ -178,6 +180,7 @@ void Region::Commit(uint64_t version) { //commit版本version
         if (page == nullptr) { 
             // GetPage returns nullptr means that the pid is new,it isn't in lru cache
             page = new (pool_.allocate()) BasePage(this, nullptr, pid, page_pool_.allocate());
+            //page = new BasePage(this,nullptr,pid);
             // cnt++;
             // start = chrono::system_clock::now();
             // page = pool_.allocate();
@@ -193,8 +196,8 @@ void Region::Commit(uint64_t version) { //commit版本version
             // durations[2] += chrono::duration_cast<chrono::microseconds>(end - start);
         }
 
-        //根据pid找DeltaPage
         DeltaPage* deltapage = page_store_->GetActiveDeltaPage(pid);
+        
         if (2 * it.second.size() + deltapage->GetDeltaPageUpdateCount() >=
             2 * Td_) {
       // the updates in page is more than the capacity of two deltapages
@@ -211,7 +214,7 @@ void Region::Commit(uint64_t version) { //commit版本version
             deltapage->ClearDeltaPage();  // delete all DeltaItems in DeltaPage
         // record the PageKey of DeltaPage passed to LSVPS
             deltapage->SetLastPageKey(deltapage_pagekey);
-            master_->AddDeltaPageVersion(pagekey.pid, version);
+            AddDeltaPageVersion(pagekey.pid, version);
             }
         }
         for (const auto& nibbles : it.second) {
@@ -229,9 +232,9 @@ void Region::Commit(uint64_t version) { //commit版本version
                 location = value_store_->WriteValue(version, path, value);
             }
             if(if_exceed) page->UpdatePage(version, location, value, nibbles, child_hash,
-                nullptr,pagekey,master_);
+                nullptr,pagekey);
             else page->UpdatePage(version, location, value, nibbles, child_hash,
-                deltapage, pagekey,master_);
+                deltapage, pagekey);
         }
         // start = chrono::system_clock::now();
         if (if_exceed) { 
@@ -263,15 +266,15 @@ void Region::Commit(uint64_t version) { //commit版本version
         std::string nibbles = it.first.substr(0, 2);
         tuple<uint64_t, uint64_t, uint64_t> location;
         string value, child_hash;
-        if (nibbles.size() == 2) {  // indexnode + indexnode
+        //if (nibbles.size() == 2) {  // indexnode + indexnode
             BasePage* base = GetPage({ version, 0, false, nibbles });
             child_hash = base->GetRoot()->GetHash();
-        }
-        else {  // (indexnode + leafnode) or leafnode
-            value = put_cache_[nibbles];
-            VDLS* value_store_ = GetValueStore();
-            location = value_store_->WriteValue(version, nibbles, value);
-        }
+        //}
+        //else {  // (indexnode + leafnode) or leafnode
+        //    value = put_cache_[nibbles];
+        //    VDLS* value_store_ = GetValueStore();
+        //    location = value_store_->WriteValue(version, nibbles, value);
+        //}
         BufferItem result = BufferItem(location, value, nibbles, child_hash);
         if (!buffer_.empty()) {
             auto& buffer_back = buffer_.back();
@@ -301,9 +304,9 @@ void Region::Commit(uint64_t version) { //commit版本version
     //for(const auto& it : active_deltapages_){
     //    page_store_->StoreActiveDeltaPage(it.second);
     //}
-    //for(auto& it : page_cache_) { 
-    //    delete it.second;  // delete BasePage
-    //}
+    for (auto &pair : page_cache_) {
+        delete pair.second;
+    }
     page_cache_.clear();
     put_cache_.clear();
 #ifdef TIMESTAMP_LOG
@@ -331,6 +334,9 @@ void Region::Stop() {
         throw std::runtime_error("Invalid Buffer State Before Stop: [First] " + std::to_string(item.first) + " [SecondSize] " + std::to_string(item.second.size()));
     }
     item.first = 0;
+    master_->MasterStop(thread_id_);
+    cout<<"1"<<endl;
+    //region_thread_.join();
     // PrintLog("Stopped | "+ GetCurrentTimeStamp(3));
 #ifdef REGION_LOG
     PrintLog("STOPPED");
@@ -338,9 +344,9 @@ void Region::Stop() {
 }
 
 void Region::Join() {
-    if (stop_) return;
-    stop_ = true;
-    queue_.stopQueue();
+    //if (stop_) return;
+    //stop_ = true;
+    //queue_.stopQueue();
     region_thread_.join();
     PrintLog("JOINED");
 #ifdef REGION_LOG
@@ -350,4 +356,3 @@ void Region::Join() {
 void Region::Flush() {
     page_store_->Flush();
 }
-

@@ -21,10 +21,10 @@ class Worker {
             pool_.reserve();
         }
         page_pool_.reserve();
-        pool_delta_.reserve();
+        //pool_delta_.reserve();
     }
     ~Worker() {
-        page_store_->Flush();
+        //page_store_->Flush();
         for (auto& it : page_cache_) {
             if (it.second) {
                 delete it.second;  // delete BasePage
@@ -37,7 +37,6 @@ class Worker {
         }
     }
     BasePage* GetPage(const PageKey& pagekey);
-    BasePage* JoinerGetPage(const PageKey& pagekey);
     DeltaPage* GetDeltaPage(const string& pid);
 
     pair<uint64_t, uint64_t>  GetPageVersion(PageKey pagekey);
@@ -49,9 +48,10 @@ class Worker {
     void  WritePageCache(PageKey pagekey, Page* page);
 
     //新增
-    PageKey GetLatestBasePageKey(PageKey pagekey) const;
-    uint64_t GetVersionUpperbound(const string& pid, uint64_t version,Master* master);
     LSVPS* GetPageStore() { return page_store_; } //新增，获取LSVPS
+    PageKey GetLatestBasePageKey(PageKey pagekey) const;
+    uint64_t GetVersionUpperbound(const string& pid, uint64_t version);
+    void AddDeltaPageVersion(const string& pid, uint64_t version);
     protected:
     LSVPS* page_store_;
     std::map<PageKey, Page*> page_cache_;
@@ -61,5 +61,8 @@ class Worker {
     std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> page_versions_;  // 根据pagekey索引current version, latest basepage version
     ElementPool<BasePage> pool_;
     PagePool page_pool_;
-    ElementPool<DeltaPage> pool_delta_;
+    //ElementPool<DeltaPage> pool_delta_;
+    std::unordered_map<string, vector<uint64_t>>deltapage_versions_;
+    uint64_t current_version_ = 1;
+    const size_t max_cache_size_ = 300000;
 };

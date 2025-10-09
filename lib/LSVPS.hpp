@@ -56,14 +56,14 @@ class LSVPS {
       : cache_(),
         table_(*this),
         index_file_path_(index_file_path),
-        active_delta_page_cache_(1000, delta_cache_dir) {}
+        active_delta_page_cache_(50000, index_file_path) {}
   //~LSVPS(){Flush();}
   Page *PageQuery(uint64_t version);
   BasePage *LoadPage(const PageKey &pagekey);
   void StorePage(Page *page);
   void AddIndexFile(const IndexFile &index_file);
   int GetNumOfIndexFile();
-  void RegisterWorker(Worker* worker);
+  void RegisterWorker(Worker* worker){worker_ = worker;}
   void RegisterTrie(Master* master);
   const std::vector<Page *> &GetTable() const;
   void Flush();
@@ -97,7 +97,7 @@ class LSVPS {
   class ActiveDeltaPageCache {
    public:
     ActiveDeltaPageCache(size_t max_size, std::string cache_dir);
-    //~ActiveDeltaPageCache();
+    ~ActiveDeltaPageCache();
     void Store(DeltaPage *page);
     DeltaPage *Get(const string &pid);
     // TODO: DeltaPage* GetNewPage();
@@ -113,8 +113,6 @@ class LSVPS {
     bool readFromDisk(const string &pid, DeltaPage *page);
     void writeIndexBlock();
     void readIndexBlock();
-
-    mutex mtx_;
     DeltaPage *page_pool_;
     std::queue<size_t> free_pages_;
     unordered_map<string, size_t> cache_;          // map pid to cache pool

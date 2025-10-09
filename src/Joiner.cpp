@@ -81,7 +81,7 @@ bool Joiner::WaitForOldVersion(uint64_t version) {
 void Joiner::WriteAllBufferItems() {
     // std::cout << "WriteAllBufferItems" << std::endl;
 
-    string pid = "";
+    string pid = "";// 获取当前处理的pid，也就是说根节点的pid是""
 
     // get the latest version number of a page
     uint64_t page_version = GetPageVersion({ 0, 0, false, pid }).first;
@@ -93,34 +93,12 @@ void Joiner::WriteAllBufferItems() {
         // GetPage returns nullptr means that the pid is new
         page = new BasePage(this, nullptr, pid);
         // PrintLog("Creating new page " + pid);
-        // page = pool_.allocate();
-        //   page->SetAttribute(this, nullptr, pid);
         PutPage(pagekey, page);  // add the newly generated page into cache
     }
-
-    DeltaPage* deltapage = GetDeltaPage(pid);
-
-    //   for (const auto& item : buffer_) {
-    //       std::string nibbles = item.nibbles_;
-    //       tuple<uint64_t, uint64_t, uint64_t> location;
-    //       string value, child_hash;
-    //       if (nibbles.size() == 2) {  // indexnode + indexnode
-    //         BasePage* base = master_->GetPage({ version_, 0, false, nibbles });
-    //         child_hash = base->GetRoot()->GetHash();
-    //       }
-    //       else {  // (indexnode + leafnode) or leafnode
-    //         PrintLog("Commit Phase 2-1-2");
-    //         value = item.value_;
-    //         value_store_ = GetValueStore();
-    //         // location = value_store_->WriteValue(version_, nibbles, value);
-    //       }
-    //       page->UpdatePage(version_, location, value, nibbles, child_hash,
-    //           deltapage, pagekey);
-    //   }
-
+    DeltaPage *deltapage = page_store_->GetActiveDeltaPage(pid);
     for (const auto& item : buffer_) {
         page->UpdatePage(version_, item.location_, item.value_, item.nibbles_, item.child_hash_,
-            deltapage, pagekey);
+            deltapage, pagekey);   
     }
     UpdatePageKey(old_pagekey, pagekey);
 
@@ -154,6 +132,7 @@ void Joiner::run() {
 
 void Joiner::Stop() {
     stop_ = true;
+    //joiner_thread_.join();
 }
 
 void Joiner::Join() {

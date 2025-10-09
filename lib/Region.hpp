@@ -78,7 +78,7 @@ private:
     static std::tuple<uint64_t, std::string, std::string> empty_task_;
 };
 
-class Region : Worker {
+class Region : public Worker {
     friend class Joiner;
     friend class Master;
 public:
@@ -124,7 +124,7 @@ private:
     TaskQueue queue_;
     const size_t thread_id_;
     std::thread region_thread_;
-    uint64_t region_version_ = 1;
+    //uint64_t region_version_ = 1;
     uint64_t commited_version_ = 0;
     bool stop_;
 

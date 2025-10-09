@@ -1,12 +1,12 @@
 #include "LSVPS.hpp"
-#include "Worker.hpp"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stack>
 #include "common.hpp"
-
+#include "Worker.hpp"
 namespace fs = std::filesystem;
 
 // IndexBlock实现
@@ -249,6 +249,7 @@ bool LookupBlock::Deserialize(std::istream &in) {
     return false;
   }
 }
+
 Page *LSVPS::PageQuery(uint64_t version) {
   return nullptr;  // unimplemented
 }
@@ -270,7 +271,7 @@ BasePage *LSVPS::LoadPage(const PageKey &pagekey) {
     current_pagekey = active_deltapage->GetLastPageKey();
   } else {
     uint64_t replay_version =
-        worker_->GetVersionUpperbound(pagekey.pid, pagekey.version,master_);
+        worker_->GetVersionUpperbound(pagekey.pid, pagekey.version);
     delta_pagekey.version = replay_version;
     // WARNING: 这个page有可能被flush所释放掉。
     DeltaPage *replay_sentinel =
@@ -350,8 +351,8 @@ const std::vector<Page *> &LSVPS::GetTable() const {
 
 int LSVPS::GetNumOfIndexFile() { return index_files_.size(); }
 
-void LSVPS::RegisterWorker(Worker* worker) { worker_ = worker; } //修改了
-void LSVPS::RegisterTrie(Master* master) { master_ = master; } //新增
+void LSVPS::RegisterTrie(Master *master_) { master_ = master_; }
+
 Page *LSVPS::pageLookup(const PageKey &pagekey) {
   auto &buffer = table_.GetBuffer();
   Page *smallest_page;
@@ -471,7 +472,8 @@ Page *LSVPS::readPageFromIndexFile(
     if (!pagekey.type) {
       page = new BasePage(worker_, data);
     } else {
-      page = new DeltaPage(data,0); 
+      //page = new DeltaPage(data,pagekey.pid);
+      page = new DeltaPage(data);
     }
   } catch (const std::exception &e) {
     throw std::runtime_error(std::string("Failed to create page: ") + e.what());
@@ -540,7 +542,7 @@ void LSVPS::MemIndexTable::Flush() {
 
   const std::string dir_path = parent_LSVPS_.index_file_path_ + "/IndexFile";
   if (!std::filesystem::exists(dir_path)) {
-    std::filesystem::create_directories(dir_path);
+    std::filesystem::create_directory(dir_path);
   }
   std::string filepath = dir_path + "/index_" +
                          std::to_string(parent_LSVPS_.GetNumOfIndexFile()) +
@@ -626,15 +628,14 @@ LSVPS::ActiveDeltaPageCache::ActiveDeltaPageCache(size_t max_size,
   }
 }
 
-//LSVPS::ActiveDeltaPageCache::~ActiveDeltaPageCache() {
-//#ifdef DEBUG
-//  std::cout << cache_.size() << std::endl;
-//#endif
-  //FlushToDisk();
-//}
+LSVPS::ActiveDeltaPageCache::~ActiveDeltaPageCache() {
+#ifdef DEBUG
+  std::cout << cache_.size() << std::endl;
+#endif
+  FlushToDisk();
+}
 
 void LSVPS::ActiveDeltaPageCache::Store(DeltaPage *page) {
-  std::lock_guard<std::mutex> lock(mtx_);
   const string &pid = page->GetPageKey().pid;
   // // 检查是否需要淘汰
   // if (cache_.find(pid) == cache_.end()) {
@@ -652,7 +653,6 @@ void LSVPS::ActiveDeltaPageCache::Store(DeltaPage *page) {
 }
 
 DeltaPage *LSVPS::ActiveDeltaPageCache::Get(const string &pid) {
-  std::lock_guard<std::mutex> lock(mtx_);
   auto it = cache_.find(pid);
   if (it != cache_.end()) {
     return &page_pool_[it->second];
@@ -858,7 +858,6 @@ void LSVPS::ActiveDeltaPageCache::readIndexBlock() {
 }
 
 void LSVPS::ActiveDeltaPageCache::FlushToDisk() {
-  std::lock_guard<std::mutex> lock(mtx_);
   // 先为所有页面准备偏移量
   for (const auto &[pid, pool_pos] : cache_) {
     prepareForBatchWrite(pid, &page_pool_[pool_pos]);

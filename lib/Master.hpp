@@ -20,10 +20,10 @@ class Master {
 public:
     Master(std::string data_path, size_t max_region_num = 8);
     ~Master() {
-        delete joiner_;
         for (auto& region : regions_) {
             delete region;
         }
+        delete joiner_;
         delete value_store_;
     }
 
@@ -36,17 +36,15 @@ public:
     VDLS* GetValueStore() {
         return value_store_;
     }
-    std::unordered_map<string, vector<uint64_t>> GetDeltaPageVersions() {
-        return deltapage_versions_;
-    }
-    void AddDeltaPageVersion(const string& pid, uint64_t version);
+    //void AddDeltaPageVersion(const string& pid, uint64_t version);
 
     DMMTrieProof GetProof(uint64_t tid, uint64_t version,
         const string& key);
     void Stop();
-
+    uint64_t GetCommitVersion();
     void WaitForCommit(uint64_t version);
     void Flush();
+    void MasterStop(size_t region_id);
 private:
     //DMMTrie* trie_;
     //LSVPS* page_store_;
@@ -57,11 +55,12 @@ private:
     vector<ConcurrentArray<pair<uint64_t, list<BufferItem>>>> bottomup_buffers_;
     // std::unordered_map<int8_t, uint8_t> nibble_dict_;
     uint8_t nibble_dict_[256];
-    uint8_t next_region_ = 0;
+    vector<int> region_stop_flags_;
+    //uint8_t next_region_ = 0;
+    //mutex mtx_;
     // const size_t max_cache_size_ = 32;          // maximum pages in cache
-    std::unordered_map<string, vector<uint64_t>>
-        deltapage_versions_;  // the versions of deltapages for every pid
-    uint64_t current_version_;
+    //std::unordered_map<string, vector<uint64_t>>deltapage_versions_;  // the versions of deltapages for every pid
+    //uint64_t current_version_;
     // size_t region_workload_[256] = {0};
     void PrintLog(const string& log) {
         std::string logmsg = std::string(RED) + "[ Master ] " + log + RESET + "\n";
