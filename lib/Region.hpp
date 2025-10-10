@@ -8,6 +8,7 @@
 #include <map>
 #include <list>
 #include "third_party/conc_queue.hpp"
+#include "third_party/blockingconcurrentqueue.h"
 #include "parallel.hpp"
 #include "VDLS.hpp"
 #include "DMMTrie.hpp"
@@ -35,21 +36,15 @@ class TaskQueue {
         #endif
     }
 
-    inline std::tuple<uint64_t, std::string, std::string> popTask() {
-        std::tuple<uint64_t, std::string, std::string> task;
-        #ifdef USE_THIRD_PARTY_LIBRARY
-        if (queue_.try_dequeue(task)) {
-            return task;
+    inline bool popTask(std::tuple<uint64_t, std::string, std::string> &task)
+    {
+        // 我把使用是否第三方库的宏定义删了 可能会影响？
+        if (isStopped())
+        {
+            return false;
         }
-        #else
-        if (queue_.size() > 0) {
-            task = std::move(queue_.front());
-            queue_.pop_front();
-            return task;
-        }
-        #endif
-
-        return TaskQueue::empty_task_;
+        queue_.wait_dequeue(task);
+        return !isStopped();
     }
 
     inline void stopQueue() {
@@ -70,7 +65,8 @@ class TaskQueue {
 
     private:
     #ifdef USE_THIRD_PARTY_LIBRARY
-    moodycamel::ConcurrentQueue<std::tuple<uint64_t, std::string, std::string>> queue_;
+    // moodycamel::ConcurrentQueue<std::tuple<uint64_t, std::string, std::string>> queue_;
+    moodycamel::BlockingConcurrentQueue<std::tuple<uint64_t, std::string, std::string>> queue_;
     #else
     ConcurrentArray<std::tuple<uint64_t, std::string, std::string>> queue_{ 65536 };
     #endif

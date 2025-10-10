@@ -2,6 +2,7 @@
 #include "DMMTrie.hpp"
 #include "LoadBalancer.hpp"
 #include "Worker.hpp"
+#include "ElementPool.hpp"
 
 const std::string& GetNibble(uint8_t nibble_value) {
     static string nibbles[256] = {
@@ -53,6 +54,9 @@ const std::string& GetNibble(uint8_t nibble_value) {
 // }
 
 Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(max_region_num),current_version_(0) {
+    ElementPool<BasePage>::init_shards(MAX_REGION_NUM);
+    ElementPool<DeltaPage>::init_shards(MAX_REGION_NUM);
+    PagePool::init_shards(MAX_REGION_NUM);
     regions_.reserve(MAX_REGION_NUM);
     value_store_ = new VDLS(data_path, "global");
     bottomup_buffers_ = vector<ConcurrentArray<pair<uint64_t, list<BufferItem>>>>(MAX_REGION_NUM);
@@ -163,7 +167,7 @@ std::string Master::Get(uint64_t tid, uint64_t version, const std::string& key) 
     for (int i = 0; i <= key.size(); i += 2) {
         string pid = nibble_path.substr(0, i);
         BasePage* page = nullptr;
-        if (i == 0)
+        if (i == 0 || i == 2 || i == 4)
             page = joiner_->GetPage({ page_version, 0, false, pid });  // false means basepage
         else
             page =
@@ -213,7 +217,7 @@ DMMTrieProof Master::GetProof(uint64_t tid, uint64_t version,
     for (int i = 0; i < key.size() + 1; i += 2) {
         string pid = nibble_path.substr(0, i);
         BasePage* page = nullptr;
-        if (i == 0)
+        if (i == 0 || i == 2 || i == 4)
             page = joiner_->GetPage({ page_version, 0, false, pid });  // false means basepage
         else {
             if (region_id >= MAX_REGION_NUM) {
