@@ -1,6 +1,7 @@
 #include "Joiner.hpp"
 #include "DMMTrie.hpp"
 #include <chrono>
+#include <unordered_set>
 
 Joiner::Joiner(Master* master) : master_(master) {
     page_store_ = new LSVPS();
@@ -91,7 +92,9 @@ void Joiner::WriteAllBufferItems() {
 
     if (page == nullptr) {
         // GetPage returns nullptr means that the pid is new
-        page = new BasePage(this, nullptr, pid);
+        // page = new BasePage(this, nullptr, pid);
+        Node *empty_root = new IndexNode(0, "", 0);
+        page = new (pool_.allocate()) BasePage(this, empty_root, pid);
         // PrintLog("Creating new page " + pid);
         PutPage(pagekey, page);  // add the newly generated page into cache
     }
