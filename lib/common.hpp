@@ -230,7 +230,7 @@ Page& operator=(Page&& other) noexcept {
   }
 
   // virtual size_t GetSerializedSize() = 0;
-
+  virtual void SerializeTo() {}
   virtual bool SerializeTo(std::ostream& out) const { return true; }
 
   virtual bool Deserialize(std::istream& in) { 

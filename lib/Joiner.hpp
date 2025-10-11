@@ -16,18 +16,21 @@ class Joiner : Worker{
     public:
     Joiner(Master* master);
     ~Joiner() {
+        //page_store_->Flush();
         if (joiner_thread_.joinable())
             joiner_thread_.join();
+        delete page_store_;
     }
     bool WaitForOldVersion(uint64_t version);
     VDLS* GetValueStore();
     void WriteAllBufferItems();
-
+    uint64_t GetVersion(){ return version_;}
     void run();
 
     void Stop();
 
     void Join();
+    void Flush();
     private:
     Master* master_;
     thread joiner_thread_;

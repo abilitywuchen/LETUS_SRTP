@@ -168,19 +168,21 @@ class DeltaPage : public Page {
     // unique items for indexnode
     uint8_t index;
     string child_hash;
-
+    DeltaItem() {}
     DeltaItem(uint8_t loc, bool leaf, uint64_t ver, const string &h,
               uint64_t fID = 0, uint64_t off = 0, uint64_t sz = 0,
               uint8_t idx = 0, const string &ch_hash = "");
     DeltaItem(char *buffer, size_t &current_size);
     void SerializeTo(char *buffer, size_t &current_size) const;
+    void SerializeTo(std::ofstream &out) const;
+    bool Deserialize(std::ifstream &in);
   };
   // DeltaPage()
 
   DeltaPage(PageKey last_pagekey = {0, 0, true, ""}, uint16_t update_count = 0,
             uint16_t b_update_count = 0);
-  // DeltaPage(char *buffer);
-  DeltaPage(char* page_data, const string& pid);
+   DeltaPage(char *buffer);
+  //DeltaPage(char* page_data, const string& pid);
   DeltaPage(const DeltaPage& other);
   void AddIndexNodeUpdate(uint8_t location, uint64_t version,
                           const string &hash, uint8_t index,
@@ -188,6 +190,7 @@ class DeltaPage : public Page {
   void AddLeafNodeUpdate(uint8_t location, uint64_t version, const string &hash,
                          uint64_t fileID, uint64_t offset, uint64_t size);
   void SerializeTo();
+  bool Deserialize(char *buffer);
   void ClearDeltaPage();
   const vector<DeltaItem> &GetDeltaItems() const;
   PageKey GetLastPageKey() const;
@@ -195,7 +198,8 @@ class DeltaPage : public Page {
   uint16_t GetDeltaPageUpdateCount();
   uint16_t GetBasePageUpdateCount();
   void ClearBasePageUpdateCount();
-
+  void SerializeTo(std::ofstream &out) const;
+  bool Deserialize(std::ifstream &in);
   private:
   // std::mutex mtx;
   vector<DeltaItem> deltaitems_;
@@ -226,12 +230,9 @@ class BasePage : public Page {
   Node* GetRoot() const;
   void SetAttribute(Worker* worker_ = nullptr, Node *root = nullptr,
     const string &pid = "", char* page_data = nullptr);
-
   private:
   Worker* worker_;
-  NibbleBucket* bucket_;
   Node* root_;  // the root of the page
-  std::mutex mutex_;
 };
 
 class DMMTrie {
@@ -269,7 +270,7 @@ class DMMTrie {
                 PageKey::Hash>
       lru_cache_;                             //  use a hash map as lru cache
   list<pair<PageKey, BasePage *>> pagekeys_;  // list to maintain cache order
-  const size_t max_cache_size_ = 15000;       // maximum pages in cache
+  const size_t max_cache_size_ = 3000000;       // maximum pages in cache
   unordered_map<string, DeltaPage>
       active_deltapages_;  // deltapage of all pages, delta pages are indexed by
                            // pid

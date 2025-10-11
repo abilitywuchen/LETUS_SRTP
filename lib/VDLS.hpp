@@ -134,12 +134,10 @@ public:
                 }
                 fileID_ = task.fileID;
                 OpenAndMapWriteFile();
-                offset_ = 0;
             }
             memcpy(static_cast<char*>(write_map_) + task.offset, 
                    task.record_ptr->c_str(), 
                    task.size);
-            offset_ += task.size;
         }
         
         // 最后刷盘
@@ -197,7 +195,7 @@ private:
     int offset_ = 0; // 用于跟踪当前偏移量
     moodycamel::BlockingConcurrentQueue<WriteTask, moodycamel::ConcurrentQueueDefaultTraits> write_queue_;
     thread write_thread_;
-    thread file_thread_;
+    //thread file_thread_;
     void* write_map_;
     void* read_map_;
     int64_t read_map_fileID_;
