@@ -44,7 +44,6 @@ void Region::run() {
 #ifdef REGION_LOG 
             PrintLog("Pop Task [STOP]");
 #endif
-            Flush();
             Stop();
 
             // PrintLog("Pop Task [" + to_string(get<0>(task)) + "-" + get<1>(task) + "-" + get<2>(task) + "]");
@@ -334,8 +333,9 @@ void Region::Stop() {
         throw std::runtime_error("Invalid Buffer State Before Stop: [First] " + std::to_string(item.first) + " [SecondSize] " + std::to_string(item.second.size()));
     }
     item.first = 0;
+    page_store_->Flush();
     master_->MasterStop(thread_id_);
-    cout<<"1"<<endl;
+    cout<<"Region_"<<region_id_<<" Stopped"<<endl;
     //region_thread_.join();
     // PrintLog("Stopped | "+ GetCurrentTimeStamp(3));
 #ifdef REGION_LOG
@@ -352,7 +352,4 @@ void Region::Join() {
 #ifdef REGION_LOG
     PrintLog("JOINED");
 #endif
-}
-void Region::Flush() {
-    page_store_->Flush();
 }

@@ -3,8 +3,10 @@
 #include <chrono>
 #include <unordered_set>
 
-Joiner::Joiner(Master* master) : master_(master) {
-    page_store_ = new LSVPS();
+Joiner::Joiner(Master* master,std::string data_path) : master_(master) {
+    string file_path = data_path + "joiner_index";
+    string cache_path = data_path + "joiner_cache";
+    page_store_ = new LSVPS(file_path,cache_path);
     page_store_->RegisterTrie(master_);
     page_store_->RegisterWorker(this);
     joiner_thread_ = thread(std::bind(&Joiner::run, this));
@@ -145,5 +147,3 @@ void Joiner::Join() {
     PrintLog("JOINED");
 #endif
 }
-
-void Joiner::Flush(){ page_store_->Flush(); }

@@ -339,7 +339,7 @@ void LSVPS::StorePage(Page *page) {
 
 void LSVPS::Flush() {
   table_.Flush();
-  active_delta_page_cache_.FlushToDisk();
+  //active_delta_page_cache_.FlushToDisk();
 }
 void LSVPS::AddIndexFile(const IndexFile &index_file) {
   index_files_.push_back(index_file);
