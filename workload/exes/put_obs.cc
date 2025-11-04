@@ -147,13 +147,12 @@ int main(int argc, char* argv[]) {
     // std::cout << kvs[8].key;
     // std::cout << " " << trie->Get(0, 3, kvs[8].key);
     // std::cout << " <==> " << kvs[8].value.at(0) << std::endl;
-    trie->Flush();
+    trie->Stop();
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::microseconds>(end - start);
     double put_latency = double(duration.count()) *
     chrono::microseconds::period::num /
     chrono::microseconds::period::den;
     std::cout << "TOTAL: " << put_latency << " s" << std::endl;
-    trie->Stop();
     return 0;
 }

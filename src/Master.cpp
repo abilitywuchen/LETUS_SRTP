@@ -124,6 +124,7 @@ void Master::Commit(uint64_t version) {
     //    PrintLog("Region " + to_string(i) + " Workload: " + to_string(region_workload_[i]));
     // }
     // exit(0);
+    current_version_ = version;
     for (auto& region : regions_) {
         region->postTask(make_tuple(0, "<COMMIT>", to_string(version)));
     }
@@ -276,7 +277,6 @@ DMMTrieProof Master::GetProof(uint64_t tid, uint64_t version,
 }
 
 void Master::Stop() {
-    joiner_->Stop();
     for (auto& region : regions_) {
         region->postTask(make_tuple(0, "<STOP>", ""));
         //region->Join();
@@ -292,6 +292,8 @@ void Master::Stop() {
         if(all_stopped) break;
         std::this_thread::yield();
     }
+    WaitForCommit(current_version_);
+    joiner_->Stop();
     return;
     // while(true)
     // if (joiner_->stopped_) return;

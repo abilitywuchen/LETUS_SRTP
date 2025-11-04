@@ -115,7 +115,6 @@ private:
 
     void Stop();
     void Join();
-    void Flush();
     Master* master_;
     TaskQueue queue_;
     const size_t thread_id_;

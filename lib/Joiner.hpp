@@ -14,7 +14,7 @@ class Joiner : Worker{
     friend class Master;
     friend class Region;
     public:
-    Joiner(Master* master);
+    Joiner(Master* master,std::string data_path);
     ~Joiner() {
         //page_store_->Flush();
         if (joiner_thread_.joinable())
@@ -30,7 +30,7 @@ class Joiner : Worker{
     void Stop();
 
     void Join();
-    void Flush();
+
     private:
     Master* master_;
     thread joiner_thread_;

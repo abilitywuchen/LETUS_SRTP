@@ -43,7 +43,6 @@ public:
     void Stop();
     uint64_t GetCommitVersion();
     void WaitForCommit(uint64_t version);
-    void Flush();
     void MasterStop(size_t region_id);
 private:
     //DMMTrie* trie_;
