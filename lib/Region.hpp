@@ -24,19 +24,19 @@ public:
 
     ~TaskQueue() = default;
 
-    inline void postTask(std::tuple<uint64_t, std::string, std::string> kvpair) {
+    inline void postTask(std::tuple<uint64_t, std::string, std::string> kvpair,std::tuple<int,size_t,size_t> location) {
         if (isStopped()) {
             std::cout << "TaskQueue is stopped, cannot post task." << std::endl;
             return;
         }
 #ifdef USE_THIRD_PARTY_LIBRARY
         queue_.enqueue(kvpair);
+        if(get<0>(kvpair)!=0) location_.enqueue(location);
 #else
         while (!queue_.push_back(kvpair));
 #endif
     }
-
-    inline bool popTask(std::tuple<uint64_t, std::string, std::string> &task)
+    inline bool popTask(std::tuple<uint64_t, std::string, std::string> &task,std::tuple<int,size_t,size_t> &location)
     {
         // 我把使用是否第三方库的宏定义删了 可能会影响？
         if (isStopped())
@@ -44,6 +44,7 @@ public:
             return false;
         }
         queue_.wait_dequeue(task);
+        if(get<0>(task)!=0) location_.wait_dequeue(location);
         return !isStopped();
     }
 
@@ -67,6 +68,7 @@ public:
     #ifdef USE_THIRD_PARTY_LIBRARY
     // moodycamel::ConcurrentQueue<std::tuple<uint64_t, std::string, std::string>> queue_;
     moodycamel::BlockingConcurrentQueue<std::tuple<uint64_t, std::string, std::string>> queue_;
+    moodycamel::BlockingConcurrentQueue<std::tuple<int,size_t,size_t>> location_;
     #else
     ConcurrentArray<std::tuple<uint64_t, std::string, std::string>> queue_{ 65536 };
 #endif
@@ -95,21 +97,19 @@ public:
 #endif
     }
     ~Region() {
-        //page_store_->Flush();
         if (stop_) return;
         stop_ = true;
         queue_.stopQueue();
         if (region_thread_.joinable()) region_thread_.join();
         delete page_store_;
     }
-    inline void postTask(std::tuple<uint64_t, std::string, std::string> kvpair) {
-        queue_.postTask(kvpair);
+    inline void postTask(std::tuple<uint64_t, std::string, std::string> kvpair,tuple<int,size_t,size_t> location) {
+        queue_.postTask(kvpair,location);
     }
-    VDLS* GetValueStore();
 private:
     void run();
 
-    void Put(std::tuple<uint64_t, std::string, std::string> kvpair);
+    void Put(std::tuple<uint64_t, std::string, std::string> kvpair,tuple<int,size_t,size_t> location);
 
     void Commit(uint64_t version);
 
@@ -125,6 +125,7 @@ private:
 
 
     std::map<std::string, std::string> put_cache_; 
+    map<string,tuple<int,size_t,size_t>> put_locations;
     ConcurrentArray<std::pair<uint64_t, list<BufferItem>>>& buffer_;
 
 inline void PrintLog(const std::string& log) {

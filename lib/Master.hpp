@@ -59,7 +59,7 @@ private:
     //mutex mtx_;
     // const size_t max_cache_size_ = 32;          // maximum pages in cache
     //std::unordered_map<string, vector<uint64_t>>deltapage_versions_;  // the versions of deltapages for every pid
-    //uint64_t current_version_;
+    uint64_t current_version_;
     // size_t region_workload_[256] = {0};
     void PrintLog(const string& log) {
         std::string logmsg = std::string(RED) + "[ Master ] " + log + RESET + "\n";

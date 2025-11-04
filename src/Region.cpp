@@ -9,18 +9,16 @@ auto CompareStrings = [](const std::string& a, const std::string& b) {
     }
     return a < b;  // then compare alphabetical order
     };
-VDLS* Region::GetValueStore() {
-    return master_->GetValueStore();
-}
 void Region::run() {
     // PrintLog(string("Nibble Bucket Address:") + to_string(reinterpret_cast<uintptr_t>(this->nibble_buckets_)));
     std::tuple<uint64_t, std::string, std::string> task;
-    while (queue_.popTask(task)&&!stop_) {
+    std::tuple<int,size_t,size_t> location;
+    while (queue_.popTask(task,location)&&!stop_) {
         if (get<0>(task) != 0) {
 #ifdef REGION_LOG 
             PrintLog("Pop Task [" + to_string(get<0>(task)) + "-" + get<1>(task) + "-" + get<2>(task) + "]");
 #endif
-            Put(task);
+            Put(task,location);
 #ifdef REGION_LOG 
             // PrintLog("PUT [" + get<1>(task) + "-" + get<2>(task) + "]");
 #endif
@@ -89,7 +87,7 @@ void Region::run() {
         // }
     }
 }
-void Region::Put(tuple<uint64_t, string, string> kvpair) {
+void Region::Put(tuple<uint64_t, string, string> kvpair,tuple<int,size_t,size_t> location) {
     uint64_t version;
     string key;
     string value;
@@ -106,6 +104,7 @@ void Region::Put(tuple<uint64_t, string, string> kvpair) {
     // 将put操作缓存到put_cache_中
     current_version_ = version;
     put_cache_[key] = value;
+    put_locations[key] = location;
     return;
 }
 
@@ -227,8 +226,9 @@ void Region::Commit(uint64_t version) { //commit版本version
             }
             else {  // (indexnode + leafnode) or leafnode
                 value = put_cache_[path];
-                VDLS* value_store_ = GetValueStore();
-                location = value_store_->WriteValue(version, path, value);
+                location = put_locations[path];
+                //VDLS* value_store_ = GetValueStore();
+                //location = value_store_->WriteValue(version, path, value);
             }
             if(if_exceed) page->UpdatePage(version, location, value, nibbles, child_hash,
                 nullptr,pagekey);
@@ -320,9 +320,7 @@ void Region::Stop() {
     if (stop_) return;
     stop_ = true;
     queue_.stopQueue();
-    // master_->running_region_num_ -= 1;
     // region_thread_.join();
-    // while (region_version_ != commited_version_);
     if (buffer_.size() == 0) {
         PrintLog("Empty Buffer Before Stop");
         throw std::runtime_error("Empty Buffer Before Stop");
@@ -333,10 +331,10 @@ void Region::Stop() {
         throw std::runtime_error("Invalid Buffer State Before Stop: [First] " + std::to_string(item.first) + " [SecondSize] " + std::to_string(item.second.size()));
     }
     item.first = 0;
+    cout<<1<<endl;
     page_store_->Flush();
     master_->MasterStop(thread_id_);
-    cout<<"Region_"<<region_id_<<" Stopped"<<endl;
-    //region_thread_.join();
+    cout<<2<<endl;
     // PrintLog("Stopped | "+ GetCurrentTimeStamp(3));
 #ifdef REGION_LOG
     PrintLog("STOPPED");
