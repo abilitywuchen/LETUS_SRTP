@@ -34,62 +34,35 @@ public:
           read_map_(MAP_FAILED),
           read_map_fileID_(-1),
           stop_flag_(false) {
-        current_fileID_.store(0);
-        current_offset_.store(0);
         write_thread_ = thread(&VDLS::WriteThreadValue, this);
     }
 
     ~VDLS() {
-        stop_flag_.store(true); // 设置停止标志
-        //给出退出信号
-        write_queue_.enqueue({ nullptr, -1, 0, 0 }); // 发送退出信号到写线程
         if (write_thread_.joinable()) {
             write_thread_.join();
         }
-        RemainingWrite();
         if (read_map_ != MAP_FAILED) {
             munmap(read_map_, MaxFileSize);
         }
     }
-    
+    void Stop(){
+        write_queue_.enqueue({ nullptr, -1, 0, 0 }); // 发送退出信号
+        stop_flag_.store(true);
+    }
     tuple<int, size_t, size_t> WriteValue(uint64_t version, const string& key, const string& value) {
         auto record_ptr = make_unique<string>(to_string(version) + "," + key + "," + value + "\n");
         size_t record_size = record_ptr->size();
-
-        int current_fileID;
         size_t offset;
-
-        // 原子地预留空间并处理文件切换
-        while (true) {
-            current_fileID = current_fileID_.load();
-            offset = current_offset_.load();
-
-            // 检查是否需要切换文件
-            if (offset + record_size > MaxFileSize) {
-                int new_fileID = current_fileID + 1;
-                // 尝试原子切换文件
-                if (current_fileID_.compare_exchange_strong(current_fileID, new_fileID)) {
-                    // 切换成功：重置偏移量并预留空间
-                    current_offset_.store(record_size); // 下条记录从record_size开始
-                    offset = 0; // 当前记录在新文件的0偏移
-                    current_fileID = new_fileID;
-                    break;
-                }
-                // 切换失败则重试（其他线程已切换）
-                continue;
-            }
-
-            // 尝试原子预留空间
-            if (current_offset_.compare_exchange_weak(offset, offset + record_size)) {
-                // 预留成功：使用当前文件和预留偏移
-                break;
-            }
+        if(current_offset_ + record_size > MaxFileSize){
+             current_fileID_ ++;
+             current_offset_ = 0;
+             offset = 0;
         }
-
+        offset = current_offset_;
+        current_offset_ += record_size;
         // 入队无锁队列
-        write_queue_.enqueue({ move(record_ptr), current_fileID, offset, record_size });
-        
-        return make_tuple(current_fileID, offset, record_size);
+        write_queue_.enqueue({ move(record_ptr), current_fileID_, offset, record_size });
+        return make_tuple(current_fileID_, offset, record_size);
     }
     
     void WriteThreadValue() {
@@ -100,7 +73,7 @@ public:
             write_queue_.wait_dequeue(task);
             
             // 检查退出信号
-            if (task.fileID == -1 || stop_flag_.load()) {
+            if (task.fileID == -1) {
                 break;
             }
 
@@ -120,34 +93,6 @@ public:
             offset_ += task.size; // 更新当前偏移量
         }
     }
-    //最后清理队列中任务
-    void RemainingWrite() {
-        WriteTask task;
-        while (write_queue_.try_dequeue(task)) {
-            if (task.fileID == -1 || !task.record_ptr) continue;
-            
-            // 检查文件是否需要切换
-            if (task.fileID != fileID_) {
-                if (write_map_ != MAP_FAILED) {
-                    msync(write_map_, MaxFileSize, MS_SYNC);
-                    munmap(write_map_, MaxFileSize);
-                }
-                fileID_ = task.fileID;
-                OpenAndMapWriteFile();
-            }
-            memcpy(static_cast<char*>(write_map_) + task.offset, 
-                   task.record_ptr->c_str(), 
-                   task.size);
-        }
-        
-        // 最后刷盘
-        if (write_map_ != MAP_FAILED) {
-            msync(write_map_, MaxFileSize, MS_SYNC);
-            munmap(write_map_, MaxFileSize);
-            write_map_ = MAP_FAILED;
-        }
-    }
-    
     string ReadValue(const tuple<uint64_t, uint64_t, uint64_t>& location) {
         uint64_t fileID, offset, size;
         tie(fileID, offset, size) = location;
@@ -189,8 +134,8 @@ private:
 
     string file_path_;
     const uint64_t MaxFileSize = 64 * 1024 * 1024; // 64MB
-    alignas(64) atomic<int> current_fileID_;
-    alignas(64) atomic<size_t> current_offset_;
+    int current_fileID_ = 0;
+    size_t current_offset_ = 0;
     int fileID_ = 0;  // 用于跟踪当前文件ID
     int offset_ = 0; // 用于跟踪当前偏移量
     moodycamel::BlockingConcurrentQueue<WriteTask, moodycamel::ConcurrentQueueDefaultTraits> write_queue_;

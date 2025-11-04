@@ -58,7 +58,6 @@ Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(ma
     ElementPool<DeltaPage>::init_shards(MAX_REGION_NUM);
     PagePool::init_shards(MAX_REGION_NUM);
     regions_.reserve(MAX_REGION_NUM);
-    value_store_ = new VDLS(data_path, "global");
     //page_store_ = new LSVPS(data_path, "LSVPS");
     bottomup_buffers_ = vector<ConcurrentArray<pair<uint64_t, list<BufferItem>>>>(MAX_REGION_NUM);
     region_stop_flags_ = vector<int>(MAX_REGION_NUM, 0);
@@ -72,12 +71,15 @@ Master::Master(std::string data_path, size_t max_region_num) : MAX_REGION_NUM(ma
         regions_.push_back(new_region);
         // PrintLog("Region " + to_string(i) + " created");
     }
-    joiner_ = new Joiner(this);
+    cout<<100<<endl;
+    joiner_ = new Joiner(this,data_path);
+    value_store_ = new VDLS(data_path, "global");
 }
 // 给region分配put任务
 void Master::Put(uint64_t tid, uint64_t version, const string& key,
     const string& value) {
     // auto nibble = key.length() >= 2 ? key.substr(0, 2) : key;
+    tuple<int,size_t,size_t> location = value_store_->WriteValue(version,key,value);
     size_t nibble_value = GetNibbleValue(key);
     // auto it = nibble_dict_.find(nibble_value);
     //     if (it != nibble_dict_.end()) {
@@ -101,7 +103,7 @@ void Master::Put(uint64_t tid, uint64_t version, const string& key,
     PrintLog("Post Task [" + to_string(version) + "-" + key + "-" + value + "] to [Region " + to_string((size_t)region_id) + "]");
 #endif
     // region_workload_[region_id]++;
-    regions_.at(region_id)->postTask(make_tuple(version, key, value));
+    regions_.at(region_id)->postTask(make_tuple(version, key, value),location);
     // }
     // else {
     //     #ifdef MASTER_LOG 
@@ -124,10 +126,10 @@ void Master::Commit(uint64_t version) {
     //    PrintLog("Region " + to_string(i) + " Workload: " + to_string(region_workload_[i]));
     // }
     // exit(0);
-    current_version_ = version;
     for (auto& region : regions_) {
-        region->postTask(make_tuple(0, "<COMMIT>", to_string(version)));
+        region->postTask(make_tuple(0, "<COMMIT>", to_string(version)),make_tuple(0,0,0));
     }
+    current_version_ = version;
     // if (version % 5 == 0) {
     //     LoadBalance();
     // }
@@ -277,8 +279,9 @@ DMMTrieProof Master::GetProof(uint64_t tid, uint64_t version,
 }
 
 void Master::Stop() {
+    value_store_->Stop();
     for (auto& region : regions_) {
-        region->postTask(make_tuple(0, "<STOP>", ""));
+        region->postTask(make_tuple(0, "<STOP>", ""),make_tuple(0,0,0));
         //region->Join();
     }
     while(1){
@@ -290,7 +293,6 @@ void Master::Stop() {
             }
         }
         if(all_stopped) break;
-        std::this_thread::yield();
     }
     WaitForCommit(current_version_);
     joiner_->Stop();
